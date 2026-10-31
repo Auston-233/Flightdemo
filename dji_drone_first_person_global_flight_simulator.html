@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>DJI Drone First-Person Global Flight Simulator 3D</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'dji-dark': '#0b0f17',
+                        'dji-card': 'rgba(10, 15, 26, 0.85)',
+                        'dji-cyan': '#00f0ff',
+                        'dji-amber': '#ff9900',
+                        'dji-red': '#ff2a2a',
+                    },
+                    fontFamily: {
+                        mono: ['Share Tech Mono', 'monospace'],
+                        orbitron: ['Orbitron', 'sans-serif'],
+                        rajdhani: ['Rajdhani', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #030509;
+            font-family: 'Rajdhani', sans-serif;
+        }
+        .dji-hud-panel {
+            background: rgba(8, 12, 22, 0.82);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            box-shadow: 0 0 25px rgba(0, 0, 0, 0.8);
+        }
+        .dji-btn {
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #ffffff;
+            transition: all 0.2s ease;
+        }
+        .dji-btn:hover, .dji-btn:active {
+            background: rgba(0, 240, 255, 0.25);
+            border-color: #00f0ff;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.6);
+            color: #00f0ff;
+        }
+        .dji-btn.active {
+            background: rgba(0, 240, 255, 0.35);
+            border-color: #00f0ff;
+            color: #00f0ff;
+            box-shadow: 0 0 18px rgba(0, 240, 255, 0.7);
+        }
+        /* Virtual Joysticks */
+        .joystick-base {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            background: rgba(5, 10, 20, 0.6);
+            border: 2px solid rgba(0, 240, 255, 0.4);
+            position: relative;
+            box-shadow: inset 0 0 20px rgba(0, 240, 255, 0.25);
+        }
+        .joystick-thumb {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #00f0ff 0%, #006688 100%);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 18px rgba(0, 240, 255, 0.9);
+            pointer-events: none;
+        }
+        /* Artificial Horizon Line Overlay */
+        .pitch-ladder-line {
+            width: 140px;
+            height: 2px;
+            background: #00f0ff;
+            box-shadow: 0 0 10px #00f0ff;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-origin: center;
+            pointer-events: none;
+        }
+        /* Compass Ribbon */
+        .compass-bar {
+            background: linear-gradient(90deg, transparent 0%, rgba(0,240,255,0.2) 50%, transparent 100%);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative overflow-hidden">
+
+    <!-- Camera Shutter Flash Layer -->
+    <div id="camera-flash" class="absolute inset-0 bg-white pointer-events-none opacity-0 z-50"></div>
+
+    <!-- 3D WebGL Canvas Layer -->
+    <div id="webgl-container" class="absolute inset-0 w-full h-full z-0"></div>
+
+    <!-- FPV Goggles Reticle HUD Overlay -->
+    <div id="fpv-overlay" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-6">
+        
+        <!-- Top Compass Heading Strip -->
+        <div class="w-full max-w-md mx-auto dji-hud-panel px-4 py-1.5 rounded-full border flex items-center justify-center font-mono text-xs text-dji-cyan tracking-widest relative overflow-hidden">
+            <div class="compass-bar absolute inset-0"></div>
+            <div id="compass-heading-text" class="relative z-10 font-bold font-orbitron">HDG 000° N</div>
+        </div>
+
+        <!-- Center Crosshair & Pitch Ladder -->
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border border-dji-cyan/20 rounded-full flex items-center justify-center">
+            <!-- Dynamic Pitch & Roll Horizon Line -->
+            <div id="horizon-pitch-bar" class="pitch-ladder-line">
+                <div class="absolute -left-3 -top-2 text-[10px] font-mono text-dji-cyan font-bold">+00</div>
+                <div class="absolute -right-3 -top-2 text-[10px] font-mono text-dji-cyan font-bold">+00</div>
+            </div>
+            <!-- Center Aim Point -->
+            <div class="w-2.5 h-2.5 bg-dji-cyan rounded-full shadow-[0_0_12px_#00f0ff]"></div>
+            <div class="absolute w-12 h-12 border-t-2 border-b-2 border-dji-cyan/60 rounded-full"></div>
+        </div>
+        
+        <!-- Top Status Indicators -->
+        <div class="flex items-center justify-between w-full font-mono text-xs text-dji-cyan">
+            <div class="flex items-center space-x-3 bg-black/70 px-3.5 py-1.5 rounded-lg border border-dji-cyan/40">
+                <span class="w-2.5 h-2.5 rounded-full bg-dji-red animate-ping inline-block"></span>
+                <span id="rec-time">REC 00:00</span>
+                <span class="text-gray-500">|</span>
+                <span id="resolution-tag">4K / 60FPS ROCKSTEADY</span>
+            </div>
+            <div class="bg-black/70 px-3.5 py-1.5 rounded-lg border border-dji-cyan/40">
+                <span class="text-dji-amber font-bold">DRONE-CENTRIC FPV CAM</span>
+            </div>
+        </div>
+        
+        <!-- Bottom FPV Link Telemetry -->
+        <div class="flex justify-between items-end font-mono text-xs text-dji-cyan/80">
+            <div>O4 HD VIDEO LINK: 1080P @ 100FPS</div>
+            <div>SIGNAL: 100% (-58 dBm)</div>
+        </div>
+    </div>
+
+    <!-- Top DJI Flight Bar (HUD Header) -->
+    <header class="relative z-20 w-full px-4 py-2.5 dji-hud-panel flex items-center justify-between font-mono text-xs border-b">
+        <!-- Left: Status Badge & Battery -->
+        <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-drone text-dji-cyan text-base"></i>
+                <span class="font-orbitron font-bold text-sm tracking-widest text-dji-cyan">DJI FPV WORLD</span>
+                <span id="flight-mode-tag" class="bg-dji-cyan/20 border border-dji-cyan/50 text-dji-cyan px-2 py-0.5 rounded font-bold">N-MODE</span>
+            </div>
+
+            <!-- Satellites & Battery -->
+            <div class="hidden sm:flex items-center space-x-3 bg-black/50 px-3 py-1 rounded-full border border-white/10">
+                <span class="flex items-center space-x-1 text-emerald-400">
+                    <i class="fa-solid fa-satellite"></i>
+                    <span id="sat-count">28 SAT</span>
+                </span>
+                <span class="text-gray-500">|</span>
+                <span class="flex items-center space-x-1.5 text-emerald-400">
+                    <i id="bat-icon" class="fa-solid fa-battery-full"></i>
+                    <span id="bat-pct" class="font-bold">96%</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- Center: Destination Jumper & Lighting -->
+        <div class="flex items-center space-x-2">
+            <select id="teleport-select" onchange="teleportToLocation(this.value)" class="dji-btn text-xs px-3 py-1.5 rounded-lg cursor-pointer font-bold font-sans">
+                <option value="tokyo">⛩️ Tokyo Skyline (Ground Level)</option>
+                <option value="everest">🏔️ Mount Everest Peak</option>
+                <option value="paris">🗼 Paris Eiffel Tower</option>
+                <option value="canyon">🏜️ Grand Canyon Gorge</option>
+                <option value="ny">🏙️ New York City Streets</option>
+                <option value="hk">🌃 Hong Kong Victoria Harbour</option>
+                <option value="pyramids">🏛️ Pyramids of Giza</option>
+                <option value="orbit">🌐 High Earth Orbit (100km+)</option>
+            </select>
+
+            <!-- Time of Day Switcher -->
+            <button id="btn-tod" onclick="cycleTimeOfDay()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans flex items-center space-x-1" title="Toggle Day/Sunset/Night">
+                <i id="tod-icon" class="fa-solid fa-sun text-dji-amber"></i>
+                <span id="tod-text" class="hidden sm:inline">DAY</span>
+            </button>
+
+            <!-- Sport Mode Speed Boost -->
+            <button id="btn-turbo" onclick="toggleTurbo()" class="dji-btn border-dji-amber/50 px-3 py-1.5 rounded-lg font-bold font-sans flex items-center space-x-1">
+                <i class="fa-solid fa-bolt text-dji-amber"></i>
+                <span id="turbo-text" class="hidden sm:inline">S-MODE OFF</span>
+            </button>
+        </div>
+
+        <!-- Right: Camera View & Audio -->
+        <div class="flex items-center space-x-2">
+            <button id="btn-view" onclick="toggleViewMode()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans flex items-center space-x-1">
+                <i class="fa-solid fa-video text-dji-cyan"></i>
+                <span id="view-label">FPV VIEW</span>
+            </button>
+
+            <button id="btn-audio" onclick="toggleAudio()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans text-gray-300">
+                <i id="audio-icon" class="fa-solid fa-volume-xmark"></i>
+            </button>
+
+            <button onclick="toggleHelpModal()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans text-dji-cyan">
+                <i class="fa-solid fa-circle-question"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Flight Telemetry HUD (Bottom Left) -->
+    <div class="absolute bottom-24 left-4 z-20 dji-hud-panel p-3.5 rounded-2xl border font-mono text-xs space-y-1.5 w-52 text-gray-200">
+        <div class="text-dji-cyan font-bold tracking-widest text-[10px] uppercase border-b border-dji-cyan/30 pb-1 mb-1 flex justify-between">
+            <span>DRONE TELEMETRY</span>
+            <span class="text-gray-400">GPS ACTIVE</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-400">ALTITUDE (H):</span>
+            <span id="hud-alt" class="text-dji-cyan font-bold">15.0 m</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-400">GROUND SPEED:</span>
+            <span id="hud-spd" class="text-emerald-400 font-bold">0.0 m/s</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-400">PITCH / ROLL:</span>
+            <span id="hud-att" class="text-dji-amber">0° / 0°</span>
+        </div>
+        <div class="flex justify-between text-[11px] pt-1 border-t border-white/10">
+            <span class="text-gray-400">LAT / LON:</span>
+            <span id="hud-coords" class="text-gray-300">35.68° N, 139.76° E</span>
+        </div>
+    </div>
+
+    <!-- On-Screen Dual Joysticks & Action Bar (Bottom Controls) -->
+    <div id="controls-bar" class="relative z-20 w-full px-6 pb-6 flex items-end justify-between pointer-events-none">
+        
+        <!-- Left Joystick: Throttle (Up/Down Altitude) & Yaw (Rotate Left/Right) -->
+        <div class="pointer-events-auto flex flex-col items-center">
+            <span class="text-[10px] font-mono text-dji-cyan bg-black/70 px-2.5 py-0.5 rounded border border-dji-cyan/30 mb-1">THROTTLE / YAW (L-STICK)</span>
+            <div id="joystick-left" class="joystick-base">
+                <div id="thumb-left" class="joystick-thumb"></div>
+            </div>
+        </div>
+
+        <!-- Center Shutter & Camera Actions -->
+        <div class="pointer-events-auto flex items-center space-x-3 bg-black/75 p-2.5 rounded-2xl border border-dji-cyan/30 backdrop-blur-md mb-2">
+            <!-- Take Photo -->
+            <button onclick="takePhoto()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 border border-dji-cyan/40 flex items-center justify-center text-white transition active:scale-95 shadow-[0_0_10px_rgba(0,240,255,0.3)]">
+                <i class="fa-solid fa-camera text-lg text-dji-cyan"></i>
+            </button>
+            
+            <!-- Record Video Button -->
+            <button id="btn-rec" onclick="toggleRecord()" class="w-14 h-14 rounded-full border-2 border-dji-red flex items-center justify-center bg-dji-red/20 hover:bg-dji-red/40 transition active:scale-95">
+                <div id="rec-dot" class="w-6 h-6 rounded-full bg-dji-red"></div>
+            </button>
+
+            <!-- Reset Level Flight -->
+            <button onclick="resetDroneLevel()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 border border-dji-cyan/40 flex items-center justify-center text-dji-amber transition active:scale-95" title="Auto-Level Drone Horizon">
+                <i class="fa-solid fa-crosshairs text-lg"></i>
+            </button>
+        </div>
+
+        <!-- Right Joystick: Pitch (Forward/Backward) & Roll (Strafe Left/Right) -->
+        <div class="pointer-events-auto flex flex-col items-center">
+            <span class="text-[10px] font-mono text-dji-cyan bg-black/70 px-2.5 py-0.5 rounded border border-dji-cyan/30 mb-1">PITCH / ROLL (R-STICK)</span>
+            <div id="joystick-right" class="joystick-base">
+                <div id="thumb-right" class="joystick-thumb"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Help & Controls Modal -->
+    <div id="help-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="dji-hud-panel w-full max-w-lg rounded-2xl p-6 border border-dji-cyan/40 relative text-sm">
+            <button onclick="toggleHelpModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <h3 class="font-orbitron font-bold text-lg text-dji-cyan mb-4 flex items-center">
+                <i class="fa-solid fa-gamepad mr-2"></i> DRONE-CENTRIC CONTROLS GUIDE
+            </h3>
+
+            <div class="grid grid-cols-2 gap-3 font-mono text-xs text-gray-200 mb-6">
+                <div class="bg-black/60 p-2.5 rounded border border-white/10">
+                    <div class="text-dji-cyan font-bold">W / S or ARROW UP/DN</div>
+                    <div class="text-gray-400">Pitch Forward / Backward</div>
+                </div>
+                <div class="bg-black/60 p-2.5 rounded border border-white/10">
+                    <div class="text-dji-cyan font-bold">A / D or ARROW L/R</div>
+                    <div class="text-gray-400">Roll (Strafe Left / Right)</div>
+                </div>
+                <div class="bg-black/60 p-2.5 rounded border border-white/10">
+                    <div class="text-emerald-400 font-bold">SPACE / SHIFT</div>
+                    <div class="text-gray-400">Ascend / Descend Altitude</div>
+                </div>
+                <div class="bg-black/60 p-2.5 rounded border border-white/10">
+                    <div class="text-emerald-400 font-bold">Q / E KEY</div>
+                    <div class="text-gray-400">Yaw Left / Right Turn</div>
+                </div>
+                <div class="bg-black/60 p-2.5 rounded border border-white/10">
+                    <div class="text-dji-amber font-bold">F KEY</div>
+                    <div class="text-gray-400">Toggle FPV / 3rd Chase Cam</div>
+                </div>
+                <div class="bg-black/60 p-2.5 rounded border border-white/10">
+                    <div class="text-dji-amber font-bold">TAB / S-MODE</div>
+                    <div class="text-gray-400">Toggle Sport Speed Boost</div>
+                </div>
+            </div>
+
+            <p class="text-xs text-gray-400 leading-relaxed mb-4">
+                * The camera is locked directly to your aircraft vector! When you turn or pitch, the world and horizon rotate in 3D around your drone camera.
+            </p>
+
+            <button onclick="toggleHelpModal()" class="w-full py-3 rounded-xl font-bold uppercase tracking-widest bg-dji-cyan hover:bg-cyan-400 text-dji-dark transition text-xs font-orbitron">
+                START FPV SIMULATION
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Simulator Engine Script -->
+    <script>
+        // --- 1. Global Setup & Variables ---
+        let scene, camera, renderer;
+        let earthMesh, cloudsMesh, atmosphereMesh, groundPlaneMesh;
+        let droneGroup, propellerMeshes = [];
+        let cityBuildingsGroup, mountainTerrainGroup;
+        let dirLight, ambientLight;
+
+        const EARTH_RADIUS = 6371; // Scale factor representation
+
+        // Camera mode: 'fpv' (First Person) or 'chase' (3rd Person tight follow)
+        let viewMode = 'fpv';
+        let timeOfDay = 'day'; // 'day', 'sunset', 'night'
+
+        // --- 2. Aircraft Local Coordinates Physics State ---
+        // Drone position in 3D world space
+        const drone = {
+            pos: new THREE.Vector3(0, 15, 0),        // Initial position (15m above ground)
+            vel: new THREE.Vector3(0, 0, 0),        // Velocity vector in world space
+            quaternion: new THREE.Quaternion(),     // Full 3D orientation
+            pitch: 0,                               // Local pitch angle (rad)
+            roll: 0,                                // Local roll angle (rad)
+            yaw: 0,                                 // Local yaw angle (rad)
+            targetPitch: 0,
+            targetRoll: 0,
+            propSpeed: 0.4,
+            isSportMode: false,
+            altitude: 15,                           // Distance above surface (m)
+            lat: 35.68,
+            lon: 139.76
+        };
+
+        // User Input Flags
+        const keys = { 
+            w: false, s: false, a: false, d: false, 
+            q: false, e: false, 
+            Space: false, ShiftLeft: false, ShiftRight: false,
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false 
+        };
+        let joyLeft = { x: 0, y: 0 };
+        let joyRight = { x: 0, y: 0 };
+
+        // Web Audio Synthesizer State
+        let audioCtx = null;
+        let motorOsc = null, motorGain = null;
+        let audioActive = false;
+
+        // Recording timer
+        let isRecording = false;
+        let recSeconds = 0;
+        let recTimer = null;
+
+        // Global Landmarks Coordinates
+        const locationPresets = {
+            tokyo: { pos: new THREE.Vector3(0, 15, 0), lat: 35.6762, lon: 139.6503, name: "Tokyo Skyline" },
+            everest: { pos: new THREE.Vector3(450, 120, -300), lat: 27.9881, lon: 86.9250, name: "Mount Everest" },
+            paris: { pos: new THREE.Vector3(-600, 25, 400), lat: 48.8584, lon: 2.2945, name: "Paris Eiffel" },
+            canyon: { pos: new THREE.Vector3(800, 30, 800), lat: 36.1069, lon: -112.1129, name: "Grand Canyon" },
+            ny: { pos: new THREE.Vector3(-1200, 20, -500), lat: 40.7128, lon: -74.0060, name: "New York City" },
+            hk: { pos: new THREE.Vector3(300, 18, 900), lat: 22.3193, lon: 114.1694, name: "Hong Kong Harbour" },
+            pyramids: { pos: new THREE.Vector3(-900, 12, 1200), lat: 29.9792, lon: 31.1342, name: "Pyramids of Giza" },
+            orbit: { pos: new THREE.Vector3(0, 3500, 0), lat: 0.0, lon: 0.0, name: "High Orbit" }
+        };
+
+        // --- 3. Initialize 3D Graphics & Engine ---
+        function initWorld() {
+            const container = document.getElementById('webgl-container');
+
+            // 3D Scene Setup
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x080c16, 0.0008);
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
+
+            // Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            container.appendChild(renderer.domElement);
+
+            // Lighting Setup
+            ambientLight = new THREE.AmbientLight(0xddeeff, 0.6);
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
+            dirLight.position.set(2000, 3000, 1500);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // Build Environment Elements
+            buildSkyAndStars();
+            buildGlobalEarthSphere();
+            buildLowLevelTerrain();
+            buildProceduralCityAndMountains();
+
+            // Build 3D DJI Drone Model
+            buildDJIDroneModel();
+
+            // Add Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            setupInputListeners();
+            setupJoysticks();
+
+            // Set Initial Orientation
+            drone.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
+
+            // Start Main Animation Loop
+            animate();
+        }
+
+        // --- 4. Environment & World Geometry ---
+        function buildSkyAndStars() {
+            // Starfield
+            const starCount = 3000;
+            const starGeo = new THREE.BufferGeometry();
+            const starPositions = new Float32Array(starCount * 3);
+
+            for (let i = 0; i < starCount * 3; i += 3) {
+                starPositions[i] = (Math.random() - 0.5) * 40000;
+                starPositions[i+1] = (Math.random() - 0.5) * 40000;
+                starPositions[i+2] = (Math.random() - 0.5) * 40000;
+            }
+
+            starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+            const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.0, transparent: true, opacity: 0.85 });
+            const stars = new THREE.Points(starGeo, starMat);
+            scene.add(stars);
+        }
+
+        function buildGlobalEarthSphere() {
+            // Earth Globe situated beneath low terrain
+            const globeGeo = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
+            
+            // Procedural Canvas Texture for Globe
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#0a192f'; ctx.fillRect(0, 0, 1024, 512); // Ocean
+            ctx.fillStyle = '#1e3a29'; // Continents
+            for (let i = 0; i < 90; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.random() * 1024, Math.random() * 512, Math.random() * 70 + 20, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const earthTex = new THREE.CanvasTexture(canvas);
+            const globeMat = new THREE.MeshPhongMaterial({ map: earthTex, shininess: 10 });
+            earthMesh = new THREE.Mesh(globeGeo, globeMat);
+            earthMesh.position.set(0, -EARTH_RADIUS, 0); // Center earth below 0,0,0
+            scene.add(earthMesh);
+
+            // Cloud Atmosphere Layer
+            const cloudGeo = new THREE.SphereGeometry(EARTH_RADIUS + 120, 48, 48);
+            const cloudMat = new THREE.MeshPhongMaterial({
+                color: 0xffffff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending
+            });
+            cloudsMesh = new THREE.Mesh(cloudGeo, cloudMat);
+            cloudsMesh.position.set(0, -EARTH_RADIUS, 0);
+            scene.add(cloudsMesh);
+        }
+
+        function buildLowLevelTerrain() {
+            // Local Ground Surface Plane (Grass / Runway detail)
+            const planeGeo = new THREE.PlaneGeometry(10000, 10000, 64, 64);
+            
+            // Procedural Ground Texture with Grid Overlay
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#111e16'; ctx.fillRect(0, 0, 512, 512);
+            ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)'; ctx.lineWidth = 2;
+            for (let i = 0; i <= 512; i += 64) {
+                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+            }
+
+            const groundTex = new THREE.CanvasTexture(canvas);
+            groundTex.wrapS = THREE.RepeatWrapping; groundTex.wrapT = THREE.RepeatWrapping;
+            groundTex.repeat.set(100, 100);
+
+            const planeMat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.8 });
+            groundPlaneMesh = new THREE.Mesh(planeGeo, planeMat);
+            groundPlaneMesh.rotation.x = -Math.PI / 2;
+            groundPlaneMesh.position.y = 0;
+            groundPlaneMesh.receiveShadow = true;
+            scene.add(groundPlaneMesh);
+        }
+
+        function buildProceduralCityAndMountains() {
+            cityBuildingsGroup = new THREE.Group();
+            scene.add(cityBuildingsGroup);
+
+            const bldgMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.6 });
+            const roofMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+
+            // Generate Skyscrapers around local area
+            for (let i = 0; i < 70; i++) {
+                const height = Math.random() * 80 + 15;
+                const width = Math.random() * 15 + 8;
+                const bldgGeo = new THREE.BoxGeometry(width, height, width);
+                const building = new THREE.Mesh(bldgGeo, bldgMat);
+
+                const angle = Math.random() * Math.PI * 2;
+                const dist = Math.random() * 1200 + 100;
+                building.position.set(Math.cos(angle) * dist, height / 2, Math.sin(angle) * dist);
+                building.castShadow = true;
+                building.receiveShadow = true;
+                cityBuildingsGroup.add(building);
+            }
+
+            // Generate Mountain Peaks in distance
+            mountainTerrainGroup = new THREE.Group();
+            scene.add(mountainTerrainGroup);
+            const mountainMat = new THREE.MeshStandardMaterial({ color: 0x334155, flatShading: true });
+
+            for (let i = 0; i < 18; i++) {
+                const radius = Math.random() * 180 + 80;
+                const height = Math.random() * 250 + 100;
+                const mtnGeo = new THREE.ConeGeometry(radius, height, 8);
+                const mountain = new THREE.Mesh(mtnGeo, mountainMat);
+
+                const angle = (i / 18) * Math.PI * 2;
+                const dist = 2200 + Math.random() * 400;
+                mountain.position.set(Math.cos(angle) * dist, height / 2, Math.sin(angle) * dist);
+                mountainTerrainGroup.add(mountain);
+            }
+        }
+
+        // --- 5. 3D DJI Quadcopter Drone Model ---
+        function buildDJIDroneModel() {
+            droneGroup = new THREE.Group();
+
+            // Central Aerodynamic Fuselage
+            const bodyGeo = new THREE.BoxGeometry(0.8, 0.25, 1.4);
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.8 });
+            const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+            droneGroup.add(bodyMesh);
+
+            // Front Gimbal Camera
+            const cameraGeo = new THREE.SphereGeometry(0.18, 16, 16);
+            const cameraMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+            const cameraMesh = new THREE.Mesh(cameraGeo, cameraMat);
+            cameraMesh.position.set(0, -0.05, -0.7);
+            droneGroup.add(cameraMesh);
+
+            // Propeller Arms & Motors
+            const armMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.9 });
+            const propPositions = [
+                { x: 1.1, z: -0.9 },   // Front Right
+                { x: -1.1, z: -0.9 },  // Front Left
+                { x: 1.1, z: 0.9 },    // Rear Right
+                { x: -1.1, z: 0.9 }    // Rear Left
+            ];
+
+            propellerMeshes = [];
+
+            propPositions.forEach((pos, idx) => {
+                // Arm Bar
+                const armGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.2);
+                const arm = new THREE.Mesh(armGeo, armMat);
+                arm.rotation.z = Math.PI / 2;
+                arm.position.set(pos.x / 2, 0, pos.z / 2);
+                droneGroup.add(arm);
+
+                // LED Lights (Front Cyan, Rear Amber)
+                const ledGeo = new THREE.SphereGeometry(0.06, 8, 8);
+                const ledMat = new THREE.MeshBasicMaterial({ color: idx < 2 ? 0x00f0ff : 0xff9900 });
+                const led = new THREE.Mesh(ledGeo, ledMat);
+                led.position.set(pos.x, -0.1, pos.z);
+                droneGroup.add(led);
+
+                // Spinning Propeller
+                const propGeo = new THREE.BoxGeometry(1.1, 0.015, 0.1);
+                const propMat = new THREE.MeshBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.85 });
+                const prop = new THREE.Mesh(propGeo, propMat);
+                prop.position.set(pos.x, 0.15, pos.z);
+                droneGroup.add(prop);
+                propellerMeshes.push(prop);
+            });
+
+            scene.add(droneGroup);
+        }
+
+        // --- 6. Input System (Keyboard & Joysticks) ---
+        function setupInputListeners() {
+            window.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyF') toggleViewMode();
+                if (e.code === 'Tab') { e.preventDefault(); toggleTurbo(); }
+                if (keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) {
+                    keys[e.key] = true;
+                    keys[e.code] = true;
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                if (keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) {
+                    keys[e.key] = false;
+                    keys[e.code] = false;
+                }
+            });
+        }
+
+        function setupJoysticks() {
+            function bindJoystick(containerId, thumbId, onChange) {
+                const container = document.getElementById(containerId);
+                const thumb = document.getElementById(thumbId);
+                let touchId = null;
+
+                function update(clientX, clientY) {
+                    const rect = container.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const cy = rect.top + rect.height / 2;
+
+                    let dx = clientX - cx;
+                    let dy = clientY - cy;
+                    const maxR = rect.width / 2 - 15;
+                    const dist = Math.hypot(dx, dy);
+
+                    if (dist > maxR) {
+                        dx = (dx / dist) * maxR;
+                        dy = (dy / dist) * maxR;
+                    }
+
+                    thumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                    onChange(dx / maxR, -dy / maxR);
+                }
+
+                container.addEventListener('pointerdown', (e) => {
+                    touchId = e.pointerId;
+                    container.setPointerCapture(e.pointerId);
+                    update(e.clientX, e.clientY);
+                });
+
+                container.addEventListener('pointermove', (e) => {
+                    if (e.pointerId === touchId) update(e.clientX, e.clientY);
+                });
+
+                const release = (e) => {
+                    if (e.pointerId === touchId) {
+                        touchId = null;
+                        thumb.style.transform = `translate(-50%, -50%)`;
+                        onChange(0, 0);
+                    }
+                };
+
+                container.addEventListener('pointerup', release);
+                container.addEventListener('pointercancel', release);
+            }
+
+            // Left Joystick: Yaw (X) & Altitude Throttle (Y)
+            bindJoystick('joystick-left', 'thumb-left', (x, y) => { joyLeft.x = x; joyLeft.y = y; });
+            
+            // Right Joystick: Roll Strafe (X) & Pitch (Y)
+            bindJoystick('joystick-right', 'thumb-right', (x, y) => { joyRight.x = x; joyRight.y = y; });
+        }
+
+        // --- 7. Aircraft Dynamic Physics Engine (Drone-Centric 6-DOF) ---
+        function updatePhysics() {
+            const speedFactor = drone.isSportMode ? 2.5 : 1.0;
+
+            // Gather Directional Controls
+            let inputPitch = (keys.w || keys.ArrowUp ? 1 : 0) - (keys.s || keys.ArrowDown ? 1 : 0) + joyRight.y;
+            let inputRoll = (keys.d || keys.ArrowRight ? 1 : 0) - (keys.a || keys.ArrowLeft ? 1 : 0) + joyRight.x;
+            let inputYaw = (keys.e ? 1 : 0) - (keys.q ? 1 : 0) + joyLeft.x;
+            let inputThrottle = (keys.Space ? 1 : 0) - (keys.ShiftLeft || keys.ShiftRight ? 1 : 0) + joyLeft.y;
+
+            // Calculate Target Pitch & Roll Tilt Angles
+            drone.targetPitch = inputPitch * 0.45;  // Forward/Backward tilt
+            drone.targetRoll = inputRoll * 0.45;    // Left/Right tilt
+
+            // Smooth Interpolation (Aircraft Inertia)
+            drone.pitch += (drone.targetPitch - drone.pitch) * 0.12;
+            drone.roll += (drone.targetRoll - drone.roll) * 0.12;
+            drone.yaw += inputYaw * 0.035 * speedFactor;
+
+            // Create Drone Local Quaternion Rotation (Order: Yaw -> Pitch -> Roll)
+            const euler = new THREE.Euler(drone.pitch, drone.yaw, drone.roll, 'YXZ');
+            drone.quaternion.setFromEuler(euler);
+
+            // Compute Drone Local Forward, Right, Up Vectors
+            const localForward = new THREE.Vector3(0, 0, -1).applyQuaternion(drone.quaternion);
+            const localRight = new THREE.Vector3(1, 0, 0).applyQuaternion(drone.quaternion);
+            const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(drone.quaternion);
+
+            // Calculate Accelerations along Local Aircraft Axes
+            const accel = new THREE.Vector3();
+            accel.addScaledVector(localForward, inputPitch * 0.8 * speedFactor);
+            accel.addScaledVector(localRight, inputRoll * 0.8 * speedFactor);
+            accel.addScaledVector(localUp, inputThrottle * 0.6 * speedFactor);
+
+            // Update Velocity with Air Resistance Drag
+            drone.vel.add(accel);
+            drone.vel.multiplyScalar(0.93);
+
+            // Update Drone Position
+            drone.pos.add(drone.vel);
+
+            // Enforce Ground Collision Limit
+            if (drone.pos.y < 1.2) {
+                drone.pos.y = 1.2;
+                drone.vel.y = Math.max(0, drone.vel.y);
+            }
+
+            drone.altitude = drone.pos.y;
+
+            // Update 3D Drone Mesh Position & Rotation
+            droneGroup.position.copy(drone.pos);
+            droneGroup.quaternion.copy(drone.quaternion);
+
+            // Spin Propellers
+            propellerMeshes.forEach(prop => {
+                prop.rotation.y += drone.propSpeed * (drone.isSportMode ? 2.2 : 1.0);
+            });
+
+            // Update Audio Engine Pitch
+            if (audioActive && motorOsc) {
+                const currentSpd = drone.vel.length();
+                motorOsc.frequency.setValueAtTime(140 + currentSpd * 18 + Math.abs(inputThrottle) * 50, audioCtx.currentTime);
+            }
+
+            // Sync Camera Position & Orientation to Drone
+            updateCameraPosition();
+
+            // Update HUD Telemetry Display
+            updateHUD();
+        }
+
+        // --- 8. Camera Attachment Modes ---
+        function updateCameraPosition() {
+            if (viewMode === 'fpv') {
+                // FPV View: Locked directly inside the front nose of the drone
+                camera.position.copy(drone.pos).add(new THREE.Vector3(0, 0.05, -0.6).applyQuaternion(drone.quaternion));
+                camera.quaternion.copy(drone.quaternion);
+                droneGroup.visible = false; // Hide drone mesh in FPV mode so it doesn't block view
+            } else {
+                // 3rd Person View: Tight Chase Cam directly behind the drone
+                const chaseOffset = new THREE.Vector3(0, 1.2, 3.8).applyQuaternion(drone.quaternion);
+                camera.position.copy(drone.pos).add(chaseOffset);
+                camera.quaternion.copy(drone.quaternion);
+                droneGroup.visible = true; // Show 3D drone model in chase camera view
+            }
+        }
+
+        // --- 9. Telemetry HUD Updates ---
+        function updateHUD() {
+            const speedMs = drone.vel.length() * 10;
+            document.getElementById('hud-alt').innerText = `${drone.altitude.toFixed(1)} m`;
+            document.getElementById('hud-spd').innerText = `${speedMs.toFixed(1)} m/s`;
+            document.getElementById('hud-att').innerText = `${(drone.pitch * 57.3).toFixed(0)}° / ${(drone.roll * 57.3).toFixed(0)}°`;
+
+            // Calculate Cardinal Heading Angle (0° = North, 90° = East, etc.)
+            let headingDeg = Math.round((-drone.yaw * 57.3) % 360);
+            if (headingDeg < 0) headingDeg += 360;
+            
+            const cardinalDir = headingDeg < 22.5 || headingDeg >= 337.5 ? 'N' :
+                                headingDeg < 67.5 ? 'NE' :
+                                headingDeg < 112.5 ? 'E' :
+                                headingDeg < 157.5 ? 'SE' :
+                                headingDeg < 202.5 ? 'S' :
+                                headingDeg < 247.5 ? 'SW' :
+                                headingDeg < 292.5 ? 'W' : 'NW';
+
+            document.getElementById('compass-heading-text').innerText = `HDG ${String(headingDeg).padStart(3, '0')}° ${cardinalDir}`;
+
+            // Horizon Line Roll & Pitch Tilt Overlay
+            const horizon = document.getElementById('horizon-pitch-bar');
+            if (horizon) {
+                horizon.style.transform = `rotate(${-drone.roll * 57.3}deg) translateY(${drone.pitch * 45}px)`;
+            }
+        }
+
+        // --- 10. User UI Actions & Controls ---
+        function toggleViewMode() {
+            viewMode = viewMode === 'fpv' ? 'chase' : 'fpv';
+            const label = document.getElementById('view-label');
+            label.innerText = viewMode === 'fpv' ? 'FPV VIEW' : '3RD CHASE';
+        }
+
+        function toggleTurbo() {
+            drone.isSportMode = !drone.isSportMode;
+            const btn = document.getElementById('btn-turbo');
+            const txt = document.getElementById('turbo-text');
+            const tag = document.getElementById('flight-mode-tag');
+
+            if (drone.isSportMode) {
+                btn.classList.add('active');
+                txt.innerText = 'S-MODE ON';
+                tag.innerText = 'S-MODE (SPORT)';
+                tag.className = 'bg-dji-amber/20 border border-dji-amber/50 text-dji-amber px-2 py-0.5 rounded font-bold';
+            } else {
+                btn.classList.remove('active');
+                txt.innerText = 'S-MODE OFF';
+                tag.innerText = 'N-MODE';
+                tag.className = 'bg-dji-cyan/20 border border-dji-cyan/50 text-dji-cyan px-2 py-0.5 rounded font-bold';
+            }
+        }
+
+        function cycleTimeOfDay() {
+            const todBtn = document.getElementById('tod-text');
+            const todIcon = document.getElementById('tod-icon');
+
+            if (timeOfDay === 'day') {
+                timeOfDay = 'sunset';
+                scene.fog.color.setHex(0x451a03);
+                renderer.setClearColor(0x7c2d12);
+                dirLight.color.setHex(0xfb923c);
+                todBtn.innerText = 'SUNSET';
+                todIcon.className = 'fa-solid fa-cloud-sun text-dji-amber';
+            } else if (timeOfDay === 'sunset') {
+                timeOfDay = 'night';
+                scene.fog.color.setHex(0x030712);
+                renderer.setClearColor(0x030712);
+                dirLight.color.setHex(0x38bdf8);
+                ambientLight.intensity = 0.25;
+                todBtn.innerText = 'NIGHT';
+                todIcon.className = 'fa-solid fa-moon text-dji-cyan';
+            } else {
+                timeOfDay = 'day';
+                scene.fog.color.setHex(0x080c16);
+                renderer.setClearColor(0x080c16);
+                dirLight.color.setHex(0xffffff);
+                ambientLight.intensity = 0.6;
+                todBtn.innerText = 'DAY';
+                todIcon.className = 'fa-solid fa-sun text-dji-amber';
+            }
+        }
+
+        function teleportToLocation(key) {
+            const target = locationPresets[key];
+            if (target) {
+                drone.pos.copy(target.pos);
+                drone.vel.set(0, 0, 0);
+                drone.pitch = 0; drone.roll = 0; drone.yaw = 0;
+                drone.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
+                document.getElementById('hud-coords').innerText = `${target.lat.toFixed(2)}° N, ${target.lon.toFixed(2)}° E`;
+            }
+        }
+
+        function resetDroneLevel() {
+            drone.pitch = 0;
+            drone.roll = 0;
+            drone.vel.set(0, 0, 0);
+        }
+
+        function toggleAudio() {
+            audioActive = !audioActive;
+            const icon = document.getElementById('audio-icon');
+
+            if (audioActive) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                motorOsc = audioCtx.createOscillator();
+                motorGain = audioCtx.createGain();
+
+                motorOsc.type = 'sawtooth';
+                motorOsc.frequency.setValueAtTime(140, audioCtx.currentTime);
+                motorGain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+
+                motorOsc.connect(motorGain);
+                motorGain.connect(audioCtx.destination);
+                motorOsc.start();
+
+                icon.className = "fa-solid fa-volume-high text-dji-cyan";
+            } else {
+                if (motorOsc) motorOsc.stop();
+                icon.className = "fa-solid fa-volume-xmark";
+            }
+        }
+
+        function takePhoto() {
+            const flash = document.getElementById('camera-flash');
+            flash.classList.remove('flash-active');
+            void flash.offsetWidth;
+            flash.classList.add('flash-active');
+        }
+
+        function toggleRecord() {
+            isRecording = !isRecording;
+            const dot = document.getElementById('rec-dot');
+            const timer = document.getElementById('rec-time');
+
+            if (isRecording) {
+                dot.className = "w-4 h-4 rounded-sm bg-dji-red";
+                recSeconds = 0;
+                recTimer = setInterval(() => {
+                    recSeconds++;
+                    const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
+                    const s = String(recSeconds % 60).padStart(2, '0');
+                    timer.innerText = `REC ${m}:${s}`;
+                }, 1000);
+            } else {
+                dot.className = "w-6 h-6 rounded-full bg-dji-red";
+                clearInterval(recTimer);
+                timer.innerText = "REC 00:00";
+            }
+        }
+
+        function toggleHelpModal() {
+            document.getElementById('help-modal').classList.toggle('hidden');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- 11. Main Animation Render Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate Cloud Layer Slowly
+            if (cloudsMesh) cloudsMesh.rotation.y += 0.0002;
+
+            updatePhysics();
+            renderer.render(scene, camera);
+        }
+
+        // Initialize Application
+        window.onload = function() {
+            initWorld();
+        };
+    </script>
+</body>
+</html>
