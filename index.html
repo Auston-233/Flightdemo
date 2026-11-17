@@ -1,972 +1,1947 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>DJI Drone First-Person Global Flight Simulator 3D</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'dji-dark': '#0b0f17',
-                        'dji-card': 'rgba(10, 15, 26, 0.85)',
-                        'dji-cyan': '#00f0ff',
-                        'dji-amber': '#ff9900',
-                        'dji-red': '#ff2a2a',
-                    },
-                    fontFamily: {
-                        mono: ['Share Tech Mono', 'monospace'],
-                        orbitron: ['Orbitron', 'sans-serif'],
-                        rajdhani: ['Rajdhani', 'sans-serif'],
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        * {
-            user-select: none;
-            -webkit-user-select: none;
-            touch-action: none;
-        }
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #030509;
-            font-family: 'Rajdhani', sans-serif;
-        }
-        .dji-hud-panel {
-            background: rgba(8, 12, 22, 0.82);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(0, 240, 255, 0.25);
-            box-shadow: 0 0 25px rgba(0, 0, 0, 0.8);
-        }
-        .dji-btn {
-            background: rgba(15, 23, 42, 0.85);
-            border: 1px solid rgba(0, 240, 255, 0.3);
-            color: #ffffff;
-            transition: all 0.2s ease;
-        }
-        .dji-btn:hover, .dji-btn:active {
-            background: rgba(0, 240, 255, 0.25);
-            border-color: #00f0ff;
-            box-shadow: 0 0 15px rgba(0, 240, 255, 0.6);
-            color: #00f0ff;
-        }
-        .dji-btn.active {
-            background: rgba(0, 240, 255, 0.35);
-            border-color: #00f0ff;
-            color: #00f0ff;
-            box-shadow: 0 0 18px rgba(0, 240, 255, 0.7);
-        }
-        /* Virtual Joysticks */
-        .joystick-base {
-            width: 130px;
-            height: 130px;
-            border-radius: 50%;
-            background: rgba(5, 10, 20, 0.6);
-            border: 2px solid rgba(0, 240, 255, 0.4);
-            position: relative;
-            box-shadow: inset 0 0 20px rgba(0, 240, 255, 0.25);
-        }
-        .joystick-thumb {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            background: radial-gradient(circle, #00f0ff 0%, #006688 100%);
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            box-shadow: 0 0 18px rgba(0, 240, 255, 0.9);
-            pointer-events: none;
-        }
-        /* Artificial Horizon Line Overlay */
-        .pitch-ladder-line {
-            width: 140px;
-            height: 2px;
-            background: #00f0ff;
-            box-shadow: 0 0 10px #00f0ff;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform-origin: center;
-            pointer-events: none;
-        }
-        /* Compass Ribbon */
-        .compass-bar {
-            background: linear-gradient(90deg, transparent 0%, rgba(0,240,255,0.2) 50%, transparent 100%);
-        }
-    </style>
-</head>
-<body class="w-screen h-screen relative overflow-hidden">
-
-    <!-- Camera Shutter Flash Layer -->
-    <div id="camera-flash" class="absolute inset-0 bg-white pointer-events-none opacity-0 z-50"></div>
-
-    <!-- 3D WebGL Canvas Layer -->
-    <div id="webgl-container" class="absolute inset-0 w-full h-full z-0"></div>
-
-    <!-- FPV Goggles Reticle HUD Overlay -->
-    <div id="fpv-overlay" class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-6">
-        
-        <!-- Top Compass Heading Strip -->
-        <div class="w-full max-w-md mx-auto dji-hud-panel px-4 py-1.5 rounded-full border flex items-center justify-center font-mono text-xs text-dji-cyan tracking-widest relative overflow-hidden">
-            <div class="compass-bar absolute inset-0"></div>
-            <div id="compass-heading-text" class="relative z-10 font-bold font-orbitron">HDG 000° N</div>
-        </div>
-
-        <!-- Center Crosshair & Pitch Ladder -->
-        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 border border-dji-cyan/20 rounded-full flex items-center justify-center">
-            <!-- Dynamic Pitch & Roll Horizon Line -->
-            <div id="horizon-pitch-bar" class="pitch-ladder-line">
-                <div class="absolute -left-3 -top-2 text-[10px] font-mono text-dji-cyan font-bold">+00</div>
-                <div class="absolute -right-3 -top-2 text-[10px] font-mono text-dji-cyan font-bold">+00</div>
-            </div>
-            <!-- Center Aim Point -->
-            <div class="w-2.5 h-2.5 bg-dji-cyan rounded-full shadow-[0_0_12px_#00f0ff]"></div>
-            <div class="absolute w-12 h-12 border-t-2 border-b-2 border-dji-cyan/60 rounded-full"></div>
-        </div>
-        
-        <!-- Top Status Indicators -->
-        <div class="flex items-center justify-between w-full font-mono text-xs text-dji-cyan">
-            <div class="flex items-center space-x-3 bg-black/70 px-3.5 py-1.5 rounded-lg border border-dji-cyan/40">
-                <span class="w-2.5 h-2.5 rounded-full bg-dji-red animate-ping inline-block"></span>
-                <span id="rec-time">REC 00:00</span>
-                <span class="text-gray-500">|</span>
-                <span id="resolution-tag">4K / 60FPS ROCKSTEADY</span>
-            </div>
-            <div class="bg-black/70 px-3.5 py-1.5 rounded-lg border border-dji-cyan/40">
-                <span class="text-dji-amber font-bold">DRONE-CENTRIC FPV CAM</span>
-            </div>
-        </div>
-        
-        <!-- Bottom FPV Link Telemetry -->
-        <div class="flex justify-between items-end font-mono text-xs text-dji-cyan/80">
-            <div>O4 HD VIDEO LINK: 1080P @ 100FPS</div>
-            <div>SIGNAL: 100% (-58 dBm)</div>
-        </div>
-    </div>
-
-    <!-- Top DJI Flight Bar (HUD Header) -->
-    <header class="relative z-20 w-full px-4 py-2.5 dji-hud-panel flex items-center justify-between font-mono text-xs border-b">
-        <!-- Left: Status Badge & Battery -->
-        <div class="flex items-center space-x-4">
-            <div class="flex items-center space-x-2">
-                <i class="fa-solid fa-drone text-dji-cyan text-base"></i>
-                <span class="font-orbitron font-bold text-sm tracking-widest text-dji-cyan">DJI FPV WORLD</span>
-                <span id="flight-mode-tag" class="bg-dji-cyan/20 border border-dji-cyan/50 text-dji-cyan px-2 py-0.5 rounded font-bold">N-MODE</span>
-            </div>
-
-            <!-- Satellites & Battery -->
-            <div class="hidden sm:flex items-center space-x-3 bg-black/50 px-3 py-1 rounded-full border border-white/10">
-                <span class="flex items-center space-x-1 text-emerald-400">
-                    <i class="fa-solid fa-satellite"></i>
-                    <span id="sat-count">28 SAT</span>
-                </span>
-                <span class="text-gray-500">|</span>
-                <span class="flex items-center space-x-1.5 text-emerald-400">
-                    <i id="bat-icon" class="fa-solid fa-battery-full"></i>
-                    <span id="bat-pct" class="font-bold">96%</span>
-                </span>
-            </div>
-        </div>
-
-        <!-- Center: Destination Jumper & Lighting -->
-        <div class="flex items-center space-x-2">
-            <select id="teleport-select" onchange="teleportToLocation(this.value)" class="dji-btn text-xs px-3 py-1.5 rounded-lg cursor-pointer font-bold font-sans">
-                <option value="tokyo">⛩️ Tokyo Skyline (Ground Level)</option>
-                <option value="everest">🏔️ Mount Everest Peak</option>
-                <option value="paris">🗼 Paris Eiffel Tower</option>
-                <option value="canyon">🏜️ Grand Canyon Gorge</option>
-                <option value="ny">🏙️ New York City Streets</option>
-                <option value="hk">🌃 Hong Kong Victoria Harbour</option>
-                <option value="pyramids">🏛️ Pyramids of Giza</option>
-                <option value="orbit">🌐 High Earth Orbit (100km+)</option>
-            </select>
-
-            <!-- Time of Day Switcher -->
-            <button id="btn-tod" onclick="cycleTimeOfDay()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans flex items-center space-x-1" title="Toggle Day/Sunset/Night">
-                <i id="tod-icon" class="fa-solid fa-sun text-dji-amber"></i>
-                <span id="tod-text" class="hidden sm:inline">DAY</span>
-            </button>
-
-            <!-- Sport Mode Speed Boost -->
-            <button id="btn-turbo" onclick="toggleTurbo()" class="dji-btn border-dji-amber/50 px-3 py-1.5 rounded-lg font-bold font-sans flex items-center space-x-1">
-                <i class="fa-solid fa-bolt text-dji-amber"></i>
-                <span id="turbo-text" class="hidden sm:inline">S-MODE OFF</span>
-            </button>
-        </div>
-
-        <!-- Right: Camera View & Audio -->
-        <div class="flex items-center space-x-2">
-            <button id="btn-view" onclick="toggleViewMode()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans flex items-center space-x-1">
-                <i class="fa-solid fa-video text-dji-cyan"></i>
-                <span id="view-label">FPV VIEW</span>
-            </button>
-
-            <button id="btn-audio" onclick="toggleAudio()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans text-gray-300">
-                <i id="audio-icon" class="fa-solid fa-volume-xmark"></i>
-            </button>
-
-            <button onclick="toggleHelpModal()" class="dji-btn px-3 py-1.5 rounded-lg font-bold font-sans text-dji-cyan">
-                <i class="fa-solid fa-circle-question"></i>
-            </button>
-        </div>
-    </header>
-
-    <!-- Flight Telemetry HUD (Bottom Left) -->
-    <div class="absolute bottom-24 left-4 z-20 dji-hud-panel p-3.5 rounded-2xl border font-mono text-xs space-y-1.5 w-52 text-gray-200">
-        <div class="text-dji-cyan font-bold tracking-widest text-[10px] uppercase border-b border-dji-cyan/30 pb-1 mb-1 flex justify-between">
-            <span>DRONE TELEMETRY</span>
-            <span class="text-gray-400">GPS ACTIVE</span>
-        </div>
-        <div class="flex justify-between">
-            <span class="text-gray-400">ALTITUDE (H):</span>
-            <span id="hud-alt" class="text-dji-cyan font-bold">15.0 m</span>
-        </div>
-        <div class="flex justify-between">
-            <span class="text-gray-400">GROUND SPEED:</span>
-            <span id="hud-spd" class="text-emerald-400 font-bold">0.0 m/s</span>
-        </div>
-        <div class="flex justify-between">
-            <span class="text-gray-400">PITCH / ROLL:</span>
-            <span id="hud-att" class="text-dji-amber">0° / 0°</span>
-        </div>
-        <div class="flex justify-between text-[11px] pt-1 border-t border-white/10">
-            <span class="text-gray-400">LAT / LON:</span>
-            <span id="hud-coords" class="text-gray-300">35.68° N, 139.76° E</span>
-        </div>
-    </div>
-
-    <!-- On-Screen Dual Joysticks & Action Bar (Bottom Controls) -->
-    <div id="controls-bar" class="relative z-20 w-full px-6 pb-6 flex items-end justify-between pointer-events-none">
-        
-        <!-- Left Joystick: Throttle (Up/Down Altitude) & Yaw (Rotate Left/Right) -->
-        <div class="pointer-events-auto flex flex-col items-center">
-            <span class="text-[10px] font-mono text-dji-cyan bg-black/70 px-2.5 py-0.5 rounded border border-dji-cyan/30 mb-1">THROTTLE / YAW (L-STICK)</span>
-            <div id="joystick-left" class="joystick-base">
-                <div id="thumb-left" class="joystick-thumb"></div>
-            </div>
-        </div>
-
-        <!-- Center Shutter & Camera Actions -->
-        <div class="pointer-events-auto flex items-center space-x-3 bg-black/75 p-2.5 rounded-2xl border border-dji-cyan/30 backdrop-blur-md mb-2">
-            <!-- Take Photo -->
-            <button onclick="takePhoto()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 border border-dji-cyan/40 flex items-center justify-center text-white transition active:scale-95 shadow-[0_0_10px_rgba(0,240,255,0.3)]">
-                <i class="fa-solid fa-camera text-lg text-dji-cyan"></i>
-            </button>
-            
-            <!-- Record Video Button -->
-            <button id="btn-rec" onclick="toggleRecord()" class="w-14 h-14 rounded-full border-2 border-dji-red flex items-center justify-center bg-dji-red/20 hover:bg-dji-red/40 transition active:scale-95">
-                <div id="rec-dot" class="w-6 h-6 rounded-full bg-dji-red"></div>
-            </button>
-
-            <!-- Reset Level Flight -->
-            <button onclick="resetDroneLevel()" class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 border border-dji-cyan/40 flex items-center justify-center text-dji-amber transition active:scale-95" title="Auto-Level Drone Horizon">
-                <i class="fa-solid fa-crosshairs text-lg"></i>
-            </button>
-        </div>
-
-        <!-- Right Joystick: Pitch (Forward/Backward) & Roll (Strafe Left/Right) -->
-        <div class="pointer-events-auto flex flex-col items-center">
-            <span class="text-[10px] font-mono text-dji-cyan bg-black/70 px-2.5 py-0.5 rounded border border-dji-cyan/30 mb-1">PITCH / ROLL (R-STICK)</span>
-            <div id="joystick-right" class="joystick-base">
-                <div id="thumb-right" class="joystick-thumb"></div>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- Help & Controls Modal -->
-    <div id="help-modal" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden flex items-center justify-center p-4">
-        <div class="dji-hud-panel w-full max-w-lg rounded-2xl p-6 border border-dji-cyan/40 relative text-sm">
-            <button onclick="toggleHelpModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-
-            <h3 class="font-orbitron font-bold text-lg text-dji-cyan mb-4 flex items-center">
-                <i class="fa-solid fa-gamepad mr-2"></i> DRONE-CENTRIC CONTROLS GUIDE
-            </h3>
-
-            <div class="grid grid-cols-2 gap-3 font-mono text-xs text-gray-200 mb-6">
-                <div class="bg-black/60 p-2.5 rounded border border-white/10">
-                    <div class="text-dji-cyan font-bold">W / S or ARROW UP/DN</div>
-                    <div class="text-gray-400">Pitch Forward / Backward</div>
-                </div>
-                <div class="bg-black/60 p-2.5 rounded border border-white/10">
-                    <div class="text-dji-cyan font-bold">A / D or ARROW L/R</div>
-                    <div class="text-gray-400">Roll (Strafe Left / Right)</div>
-                </div>
-                <div class="bg-black/60 p-2.5 rounded border border-white/10">
-                    <div class="text-emerald-400 font-bold">SPACE / SHIFT</div>
-                    <div class="text-gray-400">Ascend / Descend Altitude</div>
-                </div>
-                <div class="bg-black/60 p-2.5 rounded border border-white/10">
-                    <div class="text-emerald-400 font-bold">Q / E KEY</div>
-                    <div class="text-gray-400">Yaw Left / Right Turn</div>
-                </div>
-                <div class="bg-black/60 p-2.5 rounded border border-white/10">
-                    <div class="text-dji-amber font-bold">F KEY</div>
-                    <div class="text-gray-400">Toggle FPV / 3rd Chase Cam</div>
-                </div>
-                <div class="bg-black/60 p-2.5 rounded border border-white/10">
-                    <div class="text-dji-amber font-bold">TAB / S-MODE</div>
-                    <div class="text-gray-400">Toggle Sport Speed Boost</div>
-                </div>
-            </div>
-
-            <p class="text-xs text-gray-400 leading-relaxed mb-4">
-                * The camera is locked directly to your aircraft vector! When you turn or pitch, the world and horizon rotate in 3D around your drone camera.
-            </p>
-
-            <button onclick="toggleHelpModal()" class="w-full py-3 rounded-xl font-bold uppercase tracking-widest bg-dji-cyan hover:bg-cyan-400 text-dji-dark transition text-xs font-orbitron">
-                START FPV SIMULATION
-            </button>
-        </div>
-    </div>
-
-    <!-- Main Simulator Engine Script -->
-    <script>
-        // --- 1. Global Setup & Variables ---
-        let scene, camera, renderer;
-        let earthMesh, cloudsMesh, atmosphereMesh, groundPlaneMesh;
-        let droneGroup, propellerMeshes = [];
-        let cityBuildingsGroup, mountainTerrainGroup;
-        let dirLight, ambientLight;
-
-        const EARTH_RADIUS = 6371; // Scale factor representation
-
-        // Camera mode: 'fpv' (First Person) or 'chase' (3rd Person tight follow)
-        let viewMode = 'fpv';
-        let timeOfDay = 'day'; // 'day', 'sunset', 'night'
-
-        // --- 2. Aircraft Local Coordinates Physics State ---
-        // Drone position in 3D world space
-        const drone = {
-            pos: new THREE.Vector3(0, 15, 0),        // Initial position (15m above ground)
-            vel: new THREE.Vector3(0, 0, 0),        // Velocity vector in world space
-            quaternion: new THREE.Quaternion(),     // Full 3D orientation
-            pitch: 0,                               // Local pitch angle (rad)
-            roll: 0,                                // Local roll angle (rad)
-            yaw: 0,                                 // Local yaw angle (rad)
-            targetPitch: 0,
-            targetRoll: 0,
-            propSpeed: 0.4,
-            isSportMode: false,
-            altitude: 15,                           // Distance above surface (m)
-            lat: 35.68,
-            lon: 139.76
-        };
-
-        // User Input Flags
-        const keys = { 
-            w: false, s: false, a: false, d: false, 
-            q: false, e: false, 
-            Space: false, ShiftLeft: false, ShiftRight: false,
-            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false 
-        };
-        let joyLeft = { x: 0, y: 0 };
-        let joyRight = { x: 0, y: 0 };
-
-        // Web Audio Synthesizer State
-        let audioCtx = null;
-        let motorOsc = null, motorGain = null;
-        let audioActive = false;
-
-        // Recording timer
-        let isRecording = false;
-        let recSeconds = 0;
-        let recTimer = null;
-
-        // Global Landmarks Coordinates
-        const locationPresets = {
-            tokyo: { pos: new THREE.Vector3(0, 15, 0), lat: 35.6762, lon: 139.6503, name: "Tokyo Skyline" },
-            everest: { pos: new THREE.Vector3(450, 120, -300), lat: 27.9881, lon: 86.9250, name: "Mount Everest" },
-            paris: { pos: new THREE.Vector3(-600, 25, 400), lat: 48.8584, lon: 2.2945, name: "Paris Eiffel" },
-            canyon: { pos: new THREE.Vector3(800, 30, 800), lat: 36.1069, lon: -112.1129, name: "Grand Canyon" },
-            ny: { pos: new THREE.Vector3(-1200, 20, -500), lat: 40.7128, lon: -74.0060, name: "New York City" },
-            hk: { pos: new THREE.Vector3(300, 18, 900), lat: 22.3193, lon: 114.1694, name: "Hong Kong Harbour" },
-            pyramids: { pos: new THREE.Vector3(-900, 12, 1200), lat: 29.9792, lon: 31.1342, name: "Pyramids of Giza" },
-            orbit: { pos: new THREE.Vector3(0, 3500, 0), lat: 0.0, lon: 0.0, name: "High Orbit" }
-        };
-
-        // --- 3. Initialize 3D Graphics & Engine ---
-        function initWorld() {
-            const container = document.getElementById('webgl-container');
-
-            // 3D Scene Setup
-            scene = new THREE.Scene();
-            scene.fog = new THREE.FogExp2(0x080c16, 0.0008);
-
-            // Camera Setup
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 50000);
-
-            // Renderer Setup
-            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            renderer.shadowMap.enabled = true;
-            renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            container.appendChild(renderer.domElement);
-
-            // Lighting Setup
-            ambientLight = new THREE.AmbientLight(0xddeeff, 0.6);
-            scene.add(ambientLight);
-
-            dirLight = new THREE.DirectionalLight(0xffffff, 1.4);
-            dirLight.position.set(2000, 3000, 1500);
-            dirLight.castShadow = true;
-            scene.add(dirLight);
-
-            // Build Environment Elements
-            buildSkyAndStars();
-            buildGlobalEarthSphere();
-            buildLowLevelTerrain();
-            buildProceduralCityAndMountains();
-
-            // Build 3D DJI Drone Model
-            buildDJIDroneModel();
-
-            // Add Event Listeners
-            window.addEventListener('resize', onWindowResize);
-            setupInputListeners();
-            setupJoysticks();
-
-            // Set Initial Orientation
-            drone.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
-
-            // Start Main Animation Loop
-            animate();
-        }
-
-        // --- 4. Environment & World Geometry ---
-        function buildSkyAndStars() {
-            // Starfield
-            const starCount = 3000;
-            const starGeo = new THREE.BufferGeometry();
-            const starPositions = new Float32Array(starCount * 3);
-
-            for (let i = 0; i < starCount * 3; i += 3) {
-                starPositions[i] = (Math.random() - 0.5) * 40000;
-                starPositions[i+1] = (Math.random() - 0.5) * 40000;
-                starPositions[i+2] = (Math.random() - 0.5) * 40000;
-            }
-
-            starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-            const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2.0, transparent: true, opacity: 0.85 });
-            const stars = new THREE.Points(starGeo, starMat);
-            scene.add(stars);
-        }
-
-        function buildGlobalEarthSphere() {
-            // Earth Globe situated beneath low terrain
-            const globeGeo = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
-            
-            // Procedural Canvas Texture for Globe
-            const canvas = document.createElement('canvas');
-            canvas.width = 1024; canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#0a192f'; ctx.fillRect(0, 0, 1024, 512); // Ocean
-            ctx.fillStyle = '#1e3a29'; // Continents
-            for (let i = 0; i < 90; i++) {
-                ctx.beginPath();
-                ctx.arc(Math.random() * 1024, Math.random() * 512, Math.random() * 70 + 20, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            const earthTex = new THREE.CanvasTexture(canvas);
-            const globeMat = new THREE.MeshPhongMaterial({ map: earthTex, shininess: 10 });
-            earthMesh = new THREE.Mesh(globeGeo, globeMat);
-            earthMesh.position.set(0, -EARTH_RADIUS, 0); // Center earth below 0,0,0
-            scene.add(earthMesh);
-
-            // Cloud Atmosphere Layer
-            const cloudGeo = new THREE.SphereGeometry(EARTH_RADIUS + 120, 48, 48);
-            const cloudMat = new THREE.MeshPhongMaterial({
-                color: 0xffffff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending
-            });
-            cloudsMesh = new THREE.Mesh(cloudGeo, cloudMat);
-            cloudsMesh.position.set(0, -EARTH_RADIUS, 0);
-            scene.add(cloudsMesh);
-        }
-
-        function buildLowLevelTerrain() {
-            // Local Ground Surface Plane (Grass / Runway detail)
-            const planeGeo = new THREE.PlaneGeometry(10000, 10000, 64, 64);
-            
-            // Procedural Ground Texture with Grid Overlay
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 512;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#111e16'; ctx.fillRect(0, 0, 512, 512);
-            ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)'; ctx.lineWidth = 2;
-            for (let i = 0; i <= 512; i += 64) {
-                ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
-            }
-
-            const groundTex = new THREE.CanvasTexture(canvas);
-            groundTex.wrapS = THREE.RepeatWrapping; groundTex.wrapT = THREE.RepeatWrapping;
-            groundTex.repeat.set(100, 100);
-
-            const planeMat = new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.8 });
-            groundPlaneMesh = new THREE.Mesh(planeGeo, planeMat);
-            groundPlaneMesh.rotation.x = -Math.PI / 2;
-            groundPlaneMesh.position.y = 0;
-            groundPlaneMesh.receiveShadow = true;
-            scene.add(groundPlaneMesh);
-        }
-
-        function buildProceduralCityAndMountains() {
-            cityBuildingsGroup = new THREE.Group();
-            scene.add(cityBuildingsGroup);
-
-            const bldgMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.6 });
-            const roofMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
-
-            // Generate Skyscrapers around local area
-            for (let i = 0; i < 70; i++) {
-                const height = Math.random() * 80 + 15;
-                const width = Math.random() * 15 + 8;
-                const bldgGeo = new THREE.BoxGeometry(width, height, width);
-                const building = new THREE.Mesh(bldgGeo, bldgMat);
-
-                const angle = Math.random() * Math.PI * 2;
-                const dist = Math.random() * 1200 + 100;
-                building.position.set(Math.cos(angle) * dist, height / 2, Math.sin(angle) * dist);
-                building.castShadow = true;
-                building.receiveShadow = true;
-                cityBuildingsGroup.add(building);
-            }
-
-            // Generate Mountain Peaks in distance
-            mountainTerrainGroup = new THREE.Group();
-            scene.add(mountainTerrainGroup);
-            const mountainMat = new THREE.MeshStandardMaterial({ color: 0x334155, flatShading: true });
-
-            for (let i = 0; i < 18; i++) {
-                const radius = Math.random() * 180 + 80;
-                const height = Math.random() * 250 + 100;
-                const mtnGeo = new THREE.ConeGeometry(radius, height, 8);
-                const mountain = new THREE.Mesh(mtnGeo, mountainMat);
-
-                const angle = (i / 18) * Math.PI * 2;
-                const dist = 2200 + Math.random() * 400;
-                mountain.position.set(Math.cos(angle) * dist, height / 2, Math.sin(angle) * dist);
-                mountainTerrainGroup.add(mountain);
-            }
-        }
-
-        // --- 5. 3D DJI Quadcopter Drone Model ---
-        function buildDJIDroneModel() {
-            droneGroup = new THREE.Group();
-
-            // Central Aerodynamic Fuselage
-            const bodyGeo = new THREE.BoxGeometry(0.8, 0.25, 1.4);
-            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.2, metalness: 0.8 });
-            const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-            droneGroup.add(bodyMesh);
-
-            // Front Gimbal Camera
-            const cameraGeo = new THREE.SphereGeometry(0.18, 16, 16);
-            const cameraMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
-            const cameraMesh = new THREE.Mesh(cameraGeo, cameraMat);
-            cameraMesh.position.set(0, -0.05, -0.7);
-            droneGroup.add(cameraMesh);
-
-            // Propeller Arms & Motors
-            const armMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.9 });
-            const propPositions = [
-                { x: 1.1, z: -0.9 },   // Front Right
-                { x: -1.1, z: -0.9 },  // Front Left
-                { x: 1.1, z: 0.9 },    // Rear Right
-                { x: -1.1, z: 0.9 }    // Rear Left
-            ];
-
-            propellerMeshes = [];
-
-            propPositions.forEach((pos, idx) => {
-                // Arm Bar
-                const armGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.2);
-                const arm = new THREE.Mesh(armGeo, armMat);
-                arm.rotation.z = Math.PI / 2;
-                arm.position.set(pos.x / 2, 0, pos.z / 2);
-                droneGroup.add(arm);
-
-                // LED Lights (Front Cyan, Rear Amber)
-                const ledGeo = new THREE.SphereGeometry(0.06, 8, 8);
-                const ledMat = new THREE.MeshBasicMaterial({ color: idx < 2 ? 0x00f0ff : 0xff9900 });
-                const led = new THREE.Mesh(ledGeo, ledMat);
-                led.position.set(pos.x, -0.1, pos.z);
-                droneGroup.add(led);
-
-                // Spinning Propeller
-                const propGeo = new THREE.BoxGeometry(1.1, 0.015, 0.1);
-                const propMat = new THREE.MeshBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.85 });
-                const prop = new THREE.Mesh(propGeo, propMat);
-                prop.position.set(pos.x, 0.15, pos.z);
-                droneGroup.add(prop);
-                propellerMeshes.push(prop);
-            });
-
-            scene.add(droneGroup);
-        }
-
-        // --- 6. Input System (Keyboard & Joysticks) ---
-        function setupInputListeners() {
-            window.addEventListener('keydown', (e) => {
-                if (e.code === 'KeyF') toggleViewMode();
-                if (e.code === 'Tab') { e.preventDefault(); toggleTurbo(); }
-                if (keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) {
-                    keys[e.key] = true;
-                    keys[e.code] = true;
-                }
-            });
-
-            window.addEventListener('keyup', (e) => {
-                if (keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) {
-                    keys[e.key] = false;
-                    keys[e.code] = false;
-                }
-            });
-        }
-
-        function setupJoysticks() {
-            function bindJoystick(containerId, thumbId, onChange) {
-                const container = document.getElementById(containerId);
-                const thumb = document.getElementById(thumbId);
-                let touchId = null;
-
-                function update(clientX, clientY) {
-                    const rect = container.getBoundingClientRect();
-                    const cx = rect.left + rect.width / 2;
-                    const cy = rect.top + rect.height / 2;
-
-                    let dx = clientX - cx;
-                    let dy = clientY - cy;
-                    const maxR = rect.width / 2 - 15;
-                    const dist = Math.hypot(dx, dy);
-
-                    if (dist > maxR) {
-                        dx = (dx / dist) * maxR;
-                        dy = (dy / dist) * maxR;
-                    }
-
-                    thumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-                    onChange(dx / maxR, -dy / maxR);
-                }
-
-                container.addEventListener('pointerdown', (e) => {
-                    touchId = e.pointerId;
-                    container.setPointerCapture(e.pointerId);
-                    update(e.clientX, e.clientY);
-                });
-
-                container.addEventListener('pointermove', (e) => {
-                    if (e.pointerId === touchId) update(e.clientX, e.clientY);
-                });
-
-                const release = (e) => {
-                    if (e.pointerId === touchId) {
-                        touchId = null;
-                        thumb.style.transform = `translate(-50%, -50%)`;
-                        onChange(0, 0);
-                    }
-                };
-
-                container.addEventListener('pointerup', release);
-                container.addEventListener('pointercancel', release);
-            }
-
-            // Left Joystick: Yaw (X) & Altitude Throttle (Y)
-            bindJoystick('joystick-left', 'thumb-left', (x, y) => { joyLeft.x = x; joyLeft.y = y; });
-            
-            // Right Joystick: Roll Strafe (X) & Pitch (Y)
-            bindJoystick('joystick-right', 'thumb-right', (x, y) => { joyRight.x = x; joyRight.y = y; });
-        }
-
-        // --- 7. Aircraft Dynamic Physics Engine (Drone-Centric 6-DOF) ---
-        function updatePhysics() {
-            const speedFactor = drone.isSportMode ? 2.5 : 1.0;
-
-            // Gather Directional Controls
-            let inputPitch = (keys.w || keys.ArrowUp ? 1 : 0) - (keys.s || keys.ArrowDown ? 1 : 0) + joyRight.y;
-            let inputRoll = (keys.d || keys.ArrowRight ? 1 : 0) - (keys.a || keys.ArrowLeft ? 1 : 0) + joyRight.x;
-            let inputYaw = (keys.e ? 1 : 0) - (keys.q ? 1 : 0) + joyLeft.x;
-            let inputThrottle = (keys.Space ? 1 : 0) - (keys.ShiftLeft || keys.ShiftRight ? 1 : 0) + joyLeft.y;
-
-            // Calculate Target Pitch & Roll Tilt Angles
-            drone.targetPitch = inputPitch * 0.45;  // Forward/Backward tilt
-            drone.targetRoll = inputRoll * 0.45;    // Left/Right tilt
-
-            // Smooth Interpolation (Aircraft Inertia)
-            drone.pitch += (drone.targetPitch - drone.pitch) * 0.12;
-            drone.roll += (drone.targetRoll - drone.roll) * 0.12;
-            drone.yaw += inputYaw * 0.035 * speedFactor;
-
-            // Create Drone Local Quaternion Rotation (Order: Yaw -> Pitch -> Roll)
-            const euler = new THREE.Euler(drone.pitch, drone.yaw, drone.roll, 'YXZ');
-            drone.quaternion.setFromEuler(euler);
-
-            // Compute Drone Local Forward, Right, Up Vectors
-            const localForward = new THREE.Vector3(0, 0, -1).applyQuaternion(drone.quaternion);
-            const localRight = new THREE.Vector3(1, 0, 0).applyQuaternion(drone.quaternion);
-            const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(drone.quaternion);
-
-            // Calculate Accelerations along Local Aircraft Axes
-            const accel = new THREE.Vector3();
-            accel.addScaledVector(localForward, inputPitch * 0.8 * speedFactor);
-            accel.addScaledVector(localRight, inputRoll * 0.8 * speedFactor);
-            accel.addScaledVector(localUp, inputThrottle * 0.6 * speedFactor);
-
-            // Update Velocity with Air Resistance Drag
-            drone.vel.add(accel);
-            drone.vel.multiplyScalar(0.93);
-
-            // Update Drone Position
-            drone.pos.add(drone.vel);
-
-            // Enforce Ground Collision Limit
-            if (drone.pos.y < 1.2) {
-                drone.pos.y = 1.2;
-                drone.vel.y = Math.max(0, drone.vel.y);
-            }
-
-            drone.altitude = drone.pos.y;
-
-            // Update 3D Drone Mesh Position & Rotation
-            droneGroup.position.copy(drone.pos);
-            droneGroup.quaternion.copy(drone.quaternion);
-
-            // Spin Propellers
-            propellerMeshes.forEach(prop => {
-                prop.rotation.y += drone.propSpeed * (drone.isSportMode ? 2.2 : 1.0);
-            });
-
-            // Update Audio Engine Pitch
-            if (audioActive && motorOsc) {
-                const currentSpd = drone.vel.length();
-                motorOsc.frequency.setValueAtTime(140 + currentSpd * 18 + Math.abs(inputThrottle) * 50, audioCtx.currentTime);
-            }
-
-            // Sync Camera Position & Orientation to Drone
-            updateCameraPosition();
-
-            // Update HUD Telemetry Display
-            updateHUD();
-        }
-
-        // --- 8. Camera Attachment Modes ---
-        function updateCameraPosition() {
-            if (viewMode === 'fpv') {
-                // FPV View: Locked directly inside the front nose of the drone
-                camera.position.copy(drone.pos).add(new THREE.Vector3(0, 0.05, -0.6).applyQuaternion(drone.quaternion));
-                camera.quaternion.copy(drone.quaternion);
-                droneGroup.visible = false; // Hide drone mesh in FPV mode so it doesn't block view
-            } else {
-                // 3rd Person View: Tight Chase Cam directly behind the drone
-                const chaseOffset = new THREE.Vector3(0, 1.2, 3.8).applyQuaternion(drone.quaternion);
-                camera.position.copy(drone.pos).add(chaseOffset);
-                camera.quaternion.copy(drone.quaternion);
-                droneGroup.visible = true; // Show 3D drone model in chase camera view
-            }
-        }
-
-        // --- 9. Telemetry HUD Updates ---
-        function updateHUD() {
-            const speedMs = drone.vel.length() * 10;
-            document.getElementById('hud-alt').innerText = `${drone.altitude.toFixed(1)} m`;
-            document.getElementById('hud-spd').innerText = `${speedMs.toFixed(1)} m/s`;
-            document.getElementById('hud-att').innerText = `${(drone.pitch * 57.3).toFixed(0)}° / ${(drone.roll * 57.3).toFixed(0)}°`;
-
-            // Calculate Cardinal Heading Angle (0° = North, 90° = East, etc.)
-            let headingDeg = Math.round((-drone.yaw * 57.3) % 360);
-            if (headingDeg < 0) headingDeg += 360;
-            
-            const cardinalDir = headingDeg < 22.5 || headingDeg >= 337.5 ? 'N' :
-                                headingDeg < 67.5 ? 'NE' :
-                                headingDeg < 112.5 ? 'E' :
-                                headingDeg < 157.5 ? 'SE' :
-                                headingDeg < 202.5 ? 'S' :
-                                headingDeg < 247.5 ? 'SW' :
-                                headingDeg < 292.5 ? 'W' : 'NW';
-
-            document.getElementById('compass-heading-text').innerText = `HDG ${String(headingDeg).padStart(3, '0')}° ${cardinalDir}`;
-
-            // Horizon Line Roll & Pitch Tilt Overlay
-            const horizon = document.getElementById('horizon-pitch-bar');
-            if (horizon) {
-                horizon.style.transform = `rotate(${-drone.roll * 57.3}deg) translateY(${drone.pitch * 45}px)`;
-            }
-        }
-
-        // --- 10. User UI Actions & Controls ---
-        function toggleViewMode() {
-            viewMode = viewMode === 'fpv' ? 'chase' : 'fpv';
-            const label = document.getElementById('view-label');
-            label.innerText = viewMode === 'fpv' ? 'FPV VIEW' : '3RD CHASE';
-        }
-
-        function toggleTurbo() {
-            drone.isSportMode = !drone.isSportMode;
-            const btn = document.getElementById('btn-turbo');
-            const txt = document.getElementById('turbo-text');
-            const tag = document.getElementById('flight-mode-tag');
-
-            if (drone.isSportMode) {
-                btn.classList.add('active');
-                txt.innerText = 'S-MODE ON';
-                tag.innerText = 'S-MODE (SPORT)';
-                tag.className = 'bg-dji-amber/20 border border-dji-amber/50 text-dji-amber px-2 py-0.5 rounded font-bold';
-            } else {
-                btn.classList.remove('active');
-                txt.innerText = 'S-MODE OFF';
-                tag.innerText = 'N-MODE';
-                tag.className = 'bg-dji-cyan/20 border border-dji-cyan/50 text-dji-cyan px-2 py-0.5 rounded font-bold';
-            }
-        }
-
-        function cycleTimeOfDay() {
-            const todBtn = document.getElementById('tod-text');
-            const todIcon = document.getElementById('tod-icon');
-
-            if (timeOfDay === 'day') {
-                timeOfDay = 'sunset';
-                scene.fog.color.setHex(0x451a03);
-                renderer.setClearColor(0x7c2d12);
-                dirLight.color.setHex(0xfb923c);
-                todBtn.innerText = 'SUNSET';
-                todIcon.className = 'fa-solid fa-cloud-sun text-dji-amber';
-            } else if (timeOfDay === 'sunset') {
-                timeOfDay = 'night';
-                scene.fog.color.setHex(0x030712);
-                renderer.setClearColor(0x030712);
-                dirLight.color.setHex(0x38bdf8);
-                ambientLight.intensity = 0.25;
-                todBtn.innerText = 'NIGHT';
-                todIcon.className = 'fa-solid fa-moon text-dji-cyan';
-            } else {
-                timeOfDay = 'day';
-                scene.fog.color.setHex(0x080c16);
-                renderer.setClearColor(0x080c16);
-                dirLight.color.setHex(0xffffff);
-                ambientLight.intensity = 0.6;
-                todBtn.innerText = 'DAY';
-                todIcon.className = 'fa-solid fa-sun text-dji-amber';
-            }
-        }
-
-        function teleportToLocation(key) {
-            const target = locationPresets[key];
-            if (target) {
-                drone.pos.copy(target.pos);
-                drone.vel.set(0, 0, 0);
-                drone.pitch = 0; drone.roll = 0; drone.yaw = 0;
-                drone.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
-                document.getElementById('hud-coords').innerText = `${target.lat.toFixed(2)}° N, ${target.lon.toFixed(2)}° E`;
-            }
-        }
-
-        function resetDroneLevel() {
-            drone.pitch = 0;
-            drone.roll = 0;
-            drone.vel.set(0, 0, 0);
-        }
-
-        function toggleAudio() {
-            audioActive = !audioActive;
-            const icon = document.getElementById('audio-icon');
-
-            if (audioActive) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                motorOsc = audioCtx.createOscillator();
-                motorGain = audioCtx.createGain();
-
-                motorOsc.type = 'sawtooth';
-                motorOsc.frequency.setValueAtTime(140, audioCtx.currentTime);
-                motorGain.gain.setValueAtTime(0.06, audioCtx.currentTime);
-
-                motorOsc.connect(motorGain);
-                motorGain.connect(audioCtx.destination);
-                motorOsc.start();
-
-                icon.className = "fa-solid fa-volume-high text-dji-cyan";
-            } else {
-                if (motorOsc) motorOsc.stop();
-                icon.className = "fa-solid fa-volume-xmark";
-            }
-        }
-
-        function takePhoto() {
-            const flash = document.getElementById('camera-flash');
-            flash.classList.remove('flash-active');
-            void flash.offsetWidth;
-            flash.classList.add('flash-active');
-        }
-
-        function toggleRecord() {
-            isRecording = !isRecording;
-            const dot = document.getElementById('rec-dot');
-            const timer = document.getElementById('rec-time');
-
-            if (isRecording) {
-                dot.className = "w-4 h-4 rounded-sm bg-dji-red";
-                recSeconds = 0;
-                recTimer = setInterval(() => {
-                    recSeconds++;
-                    const m = String(Math.floor(recSeconds / 60)).padStart(2, '0');
-                    const s = String(recSeconds % 60).padStart(2, '0');
-                    timer.innerText = `REC ${m}:${s}`;
-                }, 1000);
-            } else {
-                dot.className = "w-6 h-6 rounded-full bg-dji-red";
-                clearInterval(recTimer);
-                timer.innerText = "REC 00:00";
-            }
-        }
-
-        function toggleHelpModal() {
-            document.getElementById('help-modal').classList.toggle('hidden');
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        // --- 11. Main Animation Render Loop ---
-        function animate() {
-            requestAnimationFrame(animate);
-
-            // Rotate Cloud Layer Slowly
-            if (cloudsMesh) cloudsMesh.rotation.y += 0.0002;
-
-            updatePhysics();
-            renderer.render(scene, camera);
-        }
-
-        // Initialize Application
-        window.onload = function() {
-            initWorld();
-        };
-    </script>
-</body>
+<html lang="zh">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+		<title>无人机模拟飞行</title>
+		<style>
+			:root {
+				box-sizing: border-box;
+				padding-top: env(safe-area-inset-top, 0px);
+				padding-bottom: env(safe-area-inset-bottom, 0px);
+				--bg: #0e1116;
+				--glass: rgba(14, 18, 24, .62);
+				--tx: #f2f5f8;
+				--ac: #38bdf8
+			}
+
+			@media (prefers-color-scheme:dark) {
+				:root:not([data-theme="light"]) {
+					--bg: #0e1116
+				}
+			}
+
+			:root[data-theme="dark"] {
+				--bg: #0e1116
+			}
+
+			html {
+				scroll-padding-top: env(safe-area-inset-top, 0px)
+			}
+
+			html,
+			body {
+				height: 100%
+			}
+
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--tx);
+				font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+				overflow: hidden;
+				user-select: none;
+				-webkit-user-select: none
+			}
+
+			#app {
+				position: relative;
+				width: 100%;
+				height: 100%
+			}
+
+			canvas {
+				display: block;
+				position: absolute;
+				inset: 0
+			}
+
+			.g {
+				background: var(--glass);
+				border: 1px solid rgba(255, 255, 255, .14);
+				border-radius: 12px;
+				backdrop-filter: blur(6px)
+			}
+
+			#hud {
+				position: absolute;
+				left: 10px;
+				top: 10px;
+				padding: 10px 12px;
+				font-size: 13px;
+				line-height: 1.6;
+				min-width: 150px
+			}
+
+			#hud b {
+				font-size: 16px;
+				color: var(--ac)
+			}
+
+			#help {
+				position: absolute;
+				right: 10px;
+				top: 10px;
+				padding: 8px 12px;
+				font-size: 12px;
+				line-height: 1.7;
+				max-width: 250px
+			}
+
+			#help summary {
+				cursor: pointer;
+				font-size: 13px
+			}
+
+			#bar {
+				position: absolute;
+				left: 0;
+				right: 0;
+				bottom: 10px;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				justify-content: center;
+				padding: 0 10px
+			}
+
+			button {
+				font: inherit;
+				font-size: 14px;
+				padding: 9px 14px;
+				border-radius: 10px;
+				border: 1px solid rgba(255, 255, 255, .2);
+				background: var(--glass);
+				color: var(--tx);
+				touch-action: none;
+				backdrop-filter: blur(6px)
+			}
+
+			button:active {
+				background: var(--ac);
+				color: #000
+			}
+
+			#toast {
+				position: absolute;
+				left: 50%;
+				top: 22%;
+				transform: translateX(-50%);
+				padding: 8px 16px;
+				border-radius: 20px;
+				background: var(--glass);
+				opacity: 0;
+				transition: opacity .3s;
+				pointer-events: none;
+				font-size: 15px
+			}
+
+			#fpv {
+				position: absolute;
+				inset: 0;
+				pointer-events: none;
+				display: none
+			}
+
+			#fpv:before,
+			#fpv:after {
+				content: "";
+				position: absolute;
+				left: 50%;
+				top: 50%;
+				background: rgba(255, 255, 255, .8)
+			}
+
+			#fpv:before {
+				width: 24px;
+				height: 2px;
+				margin: -1px 0 0 -12px
+			}
+
+			#fpv:after {
+				width: 2px;
+				height: 24px;
+				margin: -12px 0 0 -1px
+			}
+
+			.pad {
+				position: absolute;
+				bottom: 60px;
+				display: none;
+				grid-template-columns: repeat(3, 52px);
+				grid-template-rows: repeat(3, 52px);
+				gap: 6px
+			}
+
+			#pl {
+				left: 12px
+			}
+
+			#pr {
+				right: 12px
+			}
+
+			.pad button {
+				padding: 0;
+				font-size: 20px
+			}
+
+			@media (pointer:coarse) {
+				.pad {
+					display: grid
+				}
+
+				#bar {
+					bottom: 8px
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<div id="app">
+			<div id="fpv"></div>
+			<div id="hud" class="g"></div>
+			<details id="help" class="g" open>
+				<summary>操作说明</summary>
+				<b>W/S</b> 前进/后退　<b>A/D</b> 左移/右移<br>
+				<b>↑/空格</b> 上升　<b>↓/Shift</b> 下降<br>
+				<b>←/Q</b> 左转　<b>→/E</b> 右转<br>
+				<b>T</b> 起飞　<b>L</b> 降落　<b>H</b> 悬停刹车<br>
+				<b>O</b> 环绕（A/D 换向，W/S 调半径）<br>
+				<b>R</b> 一键返航　<b>V</b> 切换视角<br>
+				<b>C</b> 切换档位　<b>Z/X</b> 云台俯仰<br><b>F</b> 机枪(按住)　<b>G</b> 发射导弹<br><b>I</b> 红外热成像　<b>N</b> 夜视仪<br><b>[ /
+					]</b> 切换场景（共22个）
+			</details>
+			<div id="toast"></div>
+			<div id="pl" class="pad"></div>
+			<div id="pr" class="pad"></div>
+			<div id="bar"></div>
+		</div>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+		<script>
+			const $ = id => document.getElementById(id),
+				T = THREE;
+			const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+			const angLerp = (a, b, t) => {
+				const d = ((b - a + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+				return a + d * clamp(t, 0, 1)
+			};
+			let sd = 7;
+			const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+			const mat = c => new T.MeshLambertMaterial({
+				color: c
+			});
+
+			/* ---------- 场景 ---------- */
+			const scene = new T.Scene();
+			scene.background = new T.Color(0x9ccfee);
+			scene.fog = new T.Fog(0x9ccfee, 90, 430);
+			const cam = new T.PerspectiveCamera(62, 1, 0.1, 1200);
+			cam.rotation.order = 'YXZ';
+			const rd = new T.WebGLRenderer({
+				antialias: true
+			});
+			rd.setPixelRatio(Math.min(devicePixelRatio, 2));
+			$('app').prepend(rd.domElement);
+
+			function rs() {
+				const a = $('app');
+				rd.setSize(a.clientWidth, a.clientHeight);
+				cam.aspect = a.clientWidth / a.clientHeight;
+				cam.updateProjectionMatrix()
+			}
+			addEventListener('resize', rs);
+			rs();
+			scene.add(new T.HemisphereLight(0xffffff, 0x446644, 0.95));
+			const sun = new T.DirectionalLight(0xffffff, 0.7);
+			sun.position.set(60, 100, 30);
+			scene.add(sun);
+			const gr = new T.Mesh(new T.PlaneGeometry(1200, 1200), mat(0x5a8f4a));
+			gr.rotation.x = -Math.PI / 2;
+			scene.add(gr);
+			const grid = new T.GridHelper(1200, 240, 0x4a7a3c, 0x4f8341);
+			grid.position.y = 0.02;
+			scene.add(grid);
+			const pad = new T.Mesh(new T.CircleGeometry(4, 40), mat(0x888b90));
+			pad.rotation.x = -Math.PI / 2;
+			pad.position.y = 0.04;
+			scene.add(pad);
+			[
+				[-1, 0, .35, 2.4],
+				[1, 0, .35, 2.4],
+				[0, 0, 2, .35]
+			].forEach(([x, z, w, d]) => {
+				const b = new T.Mesh(new T.BoxGeometry(w, .02, d), mat(0xffffff));
+				b.position.set(x, .06, z);
+				scene.add(b)
+			});
+			const B = [];
+			for (let i = 0; i < 16; i++) {
+				const a = rnd() * 6.283,
+					r = 30 + rnd() * 150,
+					w = 8 + rnd() * 14,
+					d = 8 + rnd() * 14,
+					h = 10 + rnd() * 40,
+					x = Math.cos(a) * r,
+					z = Math.sin(a) * r;
+				const m = new T.Mesh(new T.BoxGeometry(w, h, d), mat(new T.Color().setHSL(.58, .1 + rnd() * .15, .45 + rnd() *
+					.3)));
+				m.position.set(x, h / 2, z);
+				scene.add(m);
+				B.push({
+					x,
+					z,
+					w,
+					d,
+					h
+				})
+			}
+			for (let i = 0; i < 70; i++) {
+				const a = rnd() * 6.283,
+					r = 12 + rnd() * 230,
+					x = Math.cos(a) * r,
+					z = Math.sin(a) * r;
+				const t = new T.Mesh(new T.CylinderGeometry(.3, .4, 2.5, 6), mat(0x6b4a2b));
+				t.position.set(x, 1.25, z);
+				const c = new T.Mesh(new T.ConeGeometry(1.8, 5, 8), mat(0x2f6b34));
+				c.position.set(x, 5, z);
+				scene.add(t, c)
+			}
+			const cm = new T.MeshBasicMaterial({
+				color: 0xffffff,
+				transparent: true,
+				opacity: .9
+			});
+			for (let i = 0; i < 14; i++) {
+				const c = new T.Mesh(new T.SphereGeometry(1, 10, 8), cm);
+				c.scale.set(14 + rnd() * 14, 3 + rnd() * 2, 8 + rnd() * 8);
+				c.position.set((rnd() - .5) * 600, 90 + rnd() * 50, (rnd() - .5) * 600);
+				scene.add(c)
+			}
+
+			/* ---------- 无人机模型 ---------- */
+			const G = 0.2,
+				RTH_ALT = G + 15;
+			const drone = new T.Group(),
+				body = new T.Group();
+			body.scale.setScalar(1.8);
+			drone.add(body);
+			scene.add(drone);
+			const add = (g, p) => {
+				const m = new T.Mesh(g, p.m);
+				m.position.set(...p.p);
+				if (p.r) m.rotation.y = p.r;
+				body.add(m);
+				return m
+			};
+			add(new T.BoxGeometry(.5, .14, .3), {
+				m: mat(0xdadde2),
+				p: [0, 0, 0]
+			});
+			add(new T.BoxGeometry(.3, .06, .2), {
+				m: mat(0x4b5059),
+				p: [0, .1, 0]
+			});
+			const blades = [];
+			[
+				[-1, -1],
+				[1, -1],
+				[-1, 1],
+				[1, 1]
+			].forEach(([sx, sz]) => {
+				const dx = sx * .4,
+					dz = sz * .3;
+				add(new T.BoxGeometry(.5, .03, .04), {
+					m: mat(0x4b5059),
+					p: [dx / 2, .04, dz / 2],
+					r: -Math.atan2(dz, dx)
+				});
+				add(new T.CylinderGeometry(.05, .05, .06, 10), {
+					m: mat(0x2b2f35),
+					p: [dx, .07, dz]
+				});
+				add(new T.SphereGeometry(.02, 8, 6), {
+					m: new T.MeshBasicMaterial({
+						color: sz < 0 ? 0xff2a2a : 0x2aff7a
+					}),
+					p: [dx, .03, dz]
+				});
+				const bl = add(new T.BoxGeometry(.55, .008, .045), {
+					m: new T.MeshBasicMaterial({
+						color: 0x222222,
+						transparent: true,
+						opacity: .75
+					}),
+					p: [dx, .11, dz]
+				});
+				blades.push(bl)
+			});
+			const gimbal = new T.Group();
+			gimbal.position.set(0, -.09, -.17);
+			body.add(gimbal);
+			gimbal.add(new T.Mesh(new T.SphereGeometry(.07, 12, 10), mat(0x1d2025)));
+			const lens = new T.Mesh(new T.CylinderGeometry(.03, .03, .05, 10), new T.MeshBasicMaterial({
+				color: 0x55aaff
+			}));
+			lens.rotation.x = Math.PI / 2;
+			lens.position.z = -.06;
+			gimbal.add(lens);
+			const shadow = new T.Mesh(new T.CircleGeometry(1, 24), new T.MeshBasicMaterial({
+				color: 0,
+				transparent: true,
+				opacity: .35
+			}));
+			shadow.rotation.x = -Math.PI / 2;
+			scene.add(shadow);
+			const ring = new T.Mesh(new T.RingGeometry(.985, 1, 72), new T.MeshBasicMaterial({
+				color: 0xffd23f,
+				side: T.DoubleSide
+			}));
+			ring.rotation.x = -Math.PI / 2;
+			ring.position.y = .08;
+			ring.visible = false;
+			scene.add(ring);
+			const pole = new T.Mesh(new T.CylinderGeometry(.15, .15, 6, 8), new T.MeshBasicMaterial({
+				color: 0xffd23f
+			}));
+			pole.visible = false;
+			scene.add(pole);
+
+			/* ---------- 状态 ---------- */
+			const MODES = [{
+				n: '平稳',
+				v: 3,
+				vs: 2,
+				y: .8
+			}, {
+				n: '普通',
+				v: 8,
+				vs: 4,
+				y: 1.5
+			}, {
+				n: '运动',
+				v: 16,
+				vs: 7,
+				y: 2.2
+			}];
+			const S = {
+				mode: 'landed',
+				pos: new T.Vector3(0, G, 0),
+				vel: new T.Vector3(),
+				yaw: 0,
+				gp: -.15,
+				mi: 1,
+				fpv: false,
+				orbit: null,
+				ph: 0,
+				bat: 100,
+				inp: 0,
+				rot: 0,
+				lowWarn: false
+			};
+			const keys = {},
+				k = c => keys[c] ? 1 : 0;
+			let tt;
+
+			function toast(s) {
+				const t = $('toast');
+				t.textContent = s;
+				t.style.opacity = 1;
+				clearTimeout(tt);
+				tt = setTimeout(() => t.style.opacity = 0, 1800)
+			}
+
+			const act = {
+				takeoff() {
+					if (S.mode !== 'landed') return;
+					if (S.bat < 5) return toast('电量不足，无法起飞');
+					S.mode = 'takeoff';
+					toast('起飞')
+				},
+				land() {
+					if (S.mode === 'landed' || S.mode === 'landing') return;
+					S.mode = 'landing';
+					S.orbit = null;
+					toast('自动降落')
+				},
+				hover() {
+					if (S.mode === 'landed') return;
+					if (S.mode !== 'flying') {
+						S.mode = 'flying'
+					}
+					S.orbit = null;
+					S.vel.multiplyScalar(.15);
+					toast('悬停')
+				},
+				orbit() {
+					if (S.orbit) {
+						S.orbit = null;
+						toast('结束环绕');
+						return
+					}
+					if (S.mode !== 'flying') return toast('请先起飞并进入飞行状态');
+					const r = 10,
+						c = new T.Vector3(-Math.sin(S.yaw) * r + S.pos.x, 0, -Math.cos(S.yaw) * r + S.pos.z);
+					S.orbit = {
+						c,
+						r,
+						th: Math.atan2(S.pos.z - c.z, S.pos.x - c.x),
+						dir: 1
+					};
+					toast('环绕飞行：A/D 换向，W/S 调半径')
+				},
+				rth() {
+					if (S.mode === 'rth') {
+						S.mode = 'flying';
+						return toast('取消返航')
+					}
+					if (S.mode !== 'flying' && S.mode !== 'takeoff') return;
+					S.mode = 'rth';
+					S.orbit = null;
+					S.ph = S.pos.y >= RTH_ALT - .3 ? 1 : 0;
+					toast('一键返航')
+				},
+				view() {
+					S.fpv = !S.fpv;
+					snap = true;
+					$('fpv').style.display = S.fpv ? 'block' : 'none';
+					toast(S.fpv ? '第一人称视角' : '第三人称视角')
+				},
+				speed() {
+					S.mi = (S.mi + 1) % 3;
+					toast('档位：' + MODES[S.mi].n)
+				}
+			};
+			let snap = true;
+			const ONCE = {
+				KeyT: 'takeoff',
+				KeyL: 'land',
+				KeyH: 'hover',
+				KeyO: 'orbit',
+				KeyR: 'rth',
+				KeyV: 'view',
+				KeyC: 'speed'
+			};
+			addEventListener('keydown', e => {
+				if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+				if (!e.repeat && ONCE[e.code]) act[ONCE[e.code]]();
+				keys[e.code] = true
+			});
+			addEventListener('keyup', e => keys[e.code] = false);
+			addEventListener('blur', () => {
+				for (const c in keys) keys[c] = false
+			});
+			[
+				['takeoff', '起飞 T'],
+				['land', '降落 L'],
+				['hover', '悬停 H'],
+				['orbit', '环绕 O'],
+				['rth', '返航 R'],
+				['view', '视角 V'],
+				['speed', '档位 C']
+			].forEach(([a, t]) => {
+				const b = document.createElement('button');
+				b.textContent = t;
+				b.onclick = () => act[a]();
+				$('bar').appendChild(b)
+			});
+			// 触屏虚拟按键
+			function pad_(id, list) {
+				list.forEach(([t, code, c, r]) => {
+					const b = document.createElement('button');
+					b.textContent = t;
+					b.style.gridColumn = c;
+					b.style.gridRow = r;
+					b.onpointerdown = e => {
+						e.preventDefault();
+						keys[code] = true
+					};
+					['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => b.addEventListener(ev, () => keys[
+						code] = false));
+					$(id).appendChild(b)
+				})
+			}
+			pad_('pl', [
+				['▲', 'ArrowUp', 2, 1],
+				['⟲', 'ArrowLeft', 1, 2],
+				['⟳', 'ArrowRight', 3, 2],
+				['▼', 'ArrowDown', 2, 3]
+			]);
+			pad_('pr', [
+				['↑', 'KeyW', 2, 1],
+				['←', 'KeyA', 1, 2],
+				['→', 'KeyD', 3, 2],
+				['↓', 'KeyS', 2, 3]
+			]);
+
+			/* ---------- 物理与控制 ---------- */
+			function update(dt) {
+				const m = MODES[S.mi],
+					fw = new T.Vector3(-Math.sin(S.yaw), 0, -Math.cos(S.yaw)),
+					rg = new T.Vector3(Math.cos(S.yaw), 0, -Math.sin(S.yaw));
+				const f = k('KeyW') - k('KeyS'),
+					s = k('KeyD') - k('KeyA'),
+					u = (k('ArrowUp') || k('Space')) - (k('ArrowDown') || k('ShiftLeft') || k('ShiftRight')),
+					yw = (k('KeyE') || k('ArrowRight')) - (k('KeyQ') || k('ArrowLeft'));
+				S.inp = Math.abs(f) + Math.abs(s) + Math.abs(u) + Math.abs(yw);
+				S.gp = clamp(S.gp + (k('KeyX') - k('KeyZ')) * .8 * dt, -1.5, .35);
+				const tv = new T.Vector3();
+				let kk = 3,
+					o = S.orbit;
+				if (S.mode === 'takeoff') {
+					tv.y = 2;
+					if (S.pos.y >= G + 2.5) {
+						S.mode = 'flying';
+						toast('已起飞，悬停中')
+					}
+				} else if (S.mode === 'landing') {
+					tv.y = -(S.pos.y > G + 3 ? 2 : 1);
+					kk = 4;
+					if (S.pos.y <= G + .02) landed()
+				} else if (S.mode === 'rth') {
+					const dx = -S.pos.x,
+						dz = -S.pos.z,
+						d = Math.hypot(dx, dz);
+					if (S.ph === 0) {
+						tv.y = 3;
+						if (S.pos.y >= RTH_ALT) S.ph = 1
+					} else if (S.ph === 1) {
+						S.yaw = angLerp(S.yaw, Math.atan2(-dx, -dz), dt * 2.5);
+						const sp = Math.min(7, d * .8 + 1);
+						tv.set(dx / d * sp, 0, dz / d * sp);
+						if (d < 1.2) {
+							S.mode = 'landing';
+							S.yaw = angLerp(S.yaw, 0, 1)
+						}
+					}
+				} else if (S.mode === 'flying' && !o) {
+					tv.addScaledVector(fw, f * m.v).addScaledVector(rg, s * m.v);
+					tv.y = u * m.vs;
+					S.yaw -= yw * m.y * dt;
+					kk = (f || s || u) ? 2.5 : 4.5;
+					if (S.pos.y > G + 120 && tv.y > 0) tv.y = 0;
+				}
+				if (S.mode === 'landed') {
+					S.vel.set(0, 0, 0)
+				} else if (o) {
+					if (s > 0) o.dir = 1;
+					if (s < 0) o.dir = -1;
+					o.r = clamp(o.r - f * 3 * dt, 3, 60);
+					o.th += o.dir * (m.v * .5) / o.r * dt;
+					const nx = o.c.x + Math.cos(o.th) * o.r,
+						nz = o.c.z + Math.sin(o.th) * o.r;
+					S.vel.set((nx - S.pos.x) / dt, u * m.vs, (nz - S.pos.z) / dt);
+					S.pos.x = nx;
+					S.pos.z = nz;
+					S.pos.y += u * m.vs * dt;
+					S.yaw = angLerp(S.yaw, Math.atan2(-(o.c.x - nx), -(o.c.z - nz)), dt * 5);
+				} else {
+					S.vel.lerp(tv, 1 - Math.exp(-kk * dt));
+					S.pos.addScaledVector(S.vel, dt)
+				}
+				// 地面与建筑碰撞
+				if (S.pos.y <= G && S.mode !== 'landed') {
+					S.pos.y = G;
+					if (S.vel.y < 0) S.vel.y = 0;
+					if (S.mode === 'flying' && u < 0) landed()
+				}
+				B.forEach(b => {
+					if (S.pos.y < b.h + .6) {
+						const dx = S.pos.x - b.x,
+							dz = S.pos.z - b.z,
+							ox = b.w / 2 + 1 - Math.abs(dx),
+							oz = b.d / 2 + 1 - Math.abs(dz);
+						if (ox > 0 && oz > 0) {
+							if (ox < oz) {
+								S.pos.x += Math.sign(dx || 1) * ox;
+								S.vel.x = 0
+							} else {
+								S.pos.z += Math.sign(dz || 1) * oz;
+								S.vel.z = 0
+							}
+						}
+					}
+				});
+				// 电量
+				if (S.mode === 'landed') S.bat = Math.min(100, S.bat + dt);
+				else S.bat -= .12 * dt;
+				if (S.bat < 20 && !S.lowWarn) {
+					S.lowWarn = true;
+					toast('电量低，请尽快返航 / 降落')
+				}
+				if (S.bat > 25) S.lowWarn = false;
+				if (S.bat <= 0 && S.mode !== 'landed' && S.mode !== 'landing') {
+					S.bat = 0;
+					act.land();
+					toast('电量耗尽，强制降落')
+				}
+				// 模型姿态
+				S.rot += ((S.mode === 'landed' ? 0 : 55) - S.rot) * Math.min(1, dt * 3);
+				blades.forEach((b, i) => b.rotation.y += S.rot * dt * (i % 2 ? -1 : 1));
+				const fs = S.vel.dot(fw),
+					rs_ = S.vel.dot(rg),
+					a = Math.min(1, dt * 6);
+				body.rotation.x += (clamp(-fs * .035, -.45, .45) - body.rotation.x) * a;
+				body.rotation.z += (clamp(-rs_ * .035, -.45, .45) - body.rotation.z) * a;
+				gimbal.rotation.x = S.gp;
+				drone.position.copy(S.pos);
+				drone.rotation.y = S.yaw;
+				const alt = S.pos.y - G;
+				shadow.position.set(S.pos.x, .07, S.pos.z);
+				shadow.scale.setScalar(.6 / (1 + alt * .04) + .2);
+				shadow.material.opacity = clamp(.4 - alt * .004, .1, .4);
+				ring.visible = pole.visible = !!o;
+				if (o) {
+					ring.position.x = pole.position.x = o.c.x;
+					ring.position.z = pole.position.z = o.c.z;
+					ring.scale.setScalar(o.r);
+					pole.position.y = 3
+				}
+				// 相机
+				if (S.fpv) {
+					drone.visible = false;
+					cam.fov = 78;
+					cam.position.copy(S.pos).addScaledVector(fw, .8);
+					cam.position.y += .1;
+					cam.rotation.set(S.gp, S.yaw, 0)
+				} else {
+					drone.visible = true;
+					cam.fov = 62;
+					const ideal = new T.Vector3(S.pos.x + Math.sin(S.yaw) * 7.5, Math.max(.8, S.pos.y + 2.6), S.pos.z + Math.cos(
+						S.yaw) * 7.5);
+					if (snap) cam.position.copy(ideal);
+					else cam.position.lerp(ideal, 1 - Math.exp(-dt * 5));
+					cam.lookAt(S.pos.x, S.pos.y + .5, S.pos.z)
+				}
+				snap = false;
+				cam.updateProjectionMatrix();
+			}
+
+			function landed() {
+				S.mode = 'landed';
+				S.pos.y = G;
+				S.vel.set(0, 0, 0);
+				S.orbit = null;
+				toast('已着陆')
+			}
+
+			/* ---------- HUD ---------- */
+			const DIRS = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+
+			function hud() {
+				const hs = Math.hypot(S.vel.x, S.vel.z),
+					hd = ((-S.yaw * 180 / Math.PI) % 360 + 360) % 360,
+					m = S.mode;
+				let label = m === 'landed' ? '已着陆' : m === 'takeoff' ? '起飞中' : m === 'landing' ? '降落中' : m === 'rth' ? '返航中' : S
+					.orbit ? '环绕飞行' : (hs < .3 && Math.abs(S.vel.y) < .3 && !S.inp) ? '悬停' : '飞行中';
+				$('hud').innerHTML =
+					`<b>${label}</b><br>高度　${(S.pos.y-G).toFixed(1)} m<br>水平速度　${hs.toFixed(1)} m/s<br>垂直速度　${S.vel.y.toFixed(1)} m/s<br>距返航点　${Math.hypot(S.pos.x,S.pos.z).toFixed(0)} m<br>航向　${hd.toFixed(0)}° ${DIRS[Math.round(hd/45)%8]}<br>电量　<span style="color:${S.bat<20?'#ff6b6b':'#7ee787'}">${S.bat.toFixed(0)}%</span><br>档位　${MODES[S.mi].n}　视角　${S.fpv?'第一人称':'第三人称'}<br>云台　${(S.gp*180/Math.PI).toFixed(0)}°`;
+			}
+			let last = performance.now(),
+				acc = 0;
+
+			function loop(t) {
+				const dt = clamp((t - last) / 1000, .001, .05);
+				last = t;
+				update(dt);
+				acc += dt;
+				if (acc > .1) {
+					acc = 0;
+					hud()
+				}
+				rd.render(scene, cam);
+				requestAnimationFrame(loop)
+			}
+			/* ===== 扩展：22个场景 + 武器系统 ===== */
+			const DEF = scene.children.slice(8, -4),
+				B0 = B.slice(),
+				W = new T.Group(),
+				FX = [],
+				PR = [],
+				MS = [],
+				TG = [],
+				AN = [],
+				AIM = new T.Vector3(0, 0, -1),
+				WP = {
+					ammo: 500,
+					ms: 4,
+					mt: 0,
+					gt: 0,
+					kills: 0,
+					shake: 0
+				};
+			scene.add(W);
+			const HL = scene.children[0],
+				FL = new T.PointLight(0xffaa44, 0, 70);
+			scene.add(FL);
+			let SI = 0;
+			const C = [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0xfb8c00, 0x8e24aa, 0xec407a],
+				pick = a => a[(rnd() * a.length) | 0],
+				BM = c => new T.MeshBasicMaterial({
+					color: c
+				});
+			const M = (g, c, x, y, z, o) => {
+				const m = new T.Mesh(g, o || mat(c));
+				m.position.set(x, y, z);
+				W.add(m);
+				return m
+			};
+			const bx = (x, z, w, h, d, c, y = 0, o, k = !y) => {
+				k && B.push({
+					x,
+					z,
+					w,
+					d,
+					h
+				});
+				return M(new T.BoxGeometry(w, h, d), c, x, y + h / 2, z, o)
+			};
+			const cy = (x, z, r, h, c, y = 0, r2 = r, o) => {
+				r >= 2 && !y && B.push({
+					x,
+					z,
+					w: 2 * r,
+					d: 2 * r,
+					h
+				});
+				return M(new T.CylinderGeometry(r2, r, h, 14), c, x, y + h / 2, z, o)
+			};
+			const cn = (x, z, r, h, c, y = 0, n = 12) => M(new T.ConeGeometry(r, h, n), c, x, y + h / 2, z);
+			const sp = (x, y, z, r, c, sy = 1, o) => {
+				const m = M(new T.SphereGeometry(r, 14, 10), c, x, y, z, o);
+				m.scale.y = sy;
+				return m
+			};
+			const pl = (w, d, c, x, z, y = .06, o) => {
+				const m = M(new T.PlaneGeometry(w, d), c, x, y, z, o);
+				m.rotation.x = -Math.PI / 2;
+				return m
+			};
+			const dc = (x, z, r, c, y = .06) => {
+				const m = M(new T.CircleGeometry(r, 32), c, x, y, z);
+				m.rotation.x = -Math.PI / 2;
+				return m
+			};
+			const rn = (r0, r1, c, y = .06, x = 0, z = 0) => {
+				const m = M(new T.RingGeometry(r0, r1, 64), c, x, y, z);
+				m.rotation.x = -Math.PI / 2;
+				return m
+			};
+			const sc = (n, a, b, f) => {
+				for (let i = 0; i < n; i++) {
+					const t = rnd() * 6.283,
+						r = a + rnd() * (b - a);
+					f(Math.cos(t) * r, Math.sin(t) * r, i)
+				}
+			};
+			const tree = (x, z, s = 1, c = 0x2f6b34) => {
+				cy(x, z, .4 * s, 2.5 * s, 0x6b4a2b);
+				cn(x, z, 1.8 * s, 5 * s, c, 2.5 * s)
+			};
+			const palm = (x, z) => {
+				if (z > -90) {
+					cy(x, z, .35, 7, 0x8a6a3a, 0, .2);
+					sp(x, 7.3, z, 2.4, 0x2f9a3a, .3)
+				}
+			};
+			const stars = () => {
+				const g = new T.BufferGeometry(),
+					p = [];
+				for (let i = 0; i < 900; i++) {
+					const a = rnd() * 6.283,
+						b = Math.acos(rnd());
+					p.push(700 * Math.sin(b) * Math.cos(a), 700 * Math.cos(b) + 40, 700 * Math.sin(b) * Math.sin(a))
+				}
+				g.setAttribute('position', new T.Float32BufferAttribute(p, 3));
+				W.add(new T.Points(g, new T.PointsMaterial({
+					size: 2,
+					sizeAttenuation: false,
+					fog: false
+				})))
+			};
+			const SC = [{
+					n: '城郊公园',
+					sky: 0x9ccfee,
+					g: 0x5a8f4a,
+					f: 430
+				},
+				{
+					n: '沙滩海边',
+					sky: 0x8fd3f5,
+					g: 0xe8d9a0,
+					f: 500,
+					sea: 1,
+					b() {
+						pl(1400, 500, 0x1e90d0, 0, -350, .05);
+						pl(1400, 5, 0xffffff, 0, -98, .07);
+						sc(36, 12, 130, palm);
+						sc(12, 12, 70, (x, z) => {
+							if (z > -80) {
+								cy(x, z, .05, 2.5, 0xffffff);
+								cn(x, z, 1.7, .8, pick(C), 2.5);
+								dc(x + 2, z, 1.2, pick(C))
+							}
+						});
+						for (let i = 0; i < 4; i++) {
+							bx(-40 + i * 26, 60, 7, 4, 6, 0xf2e3c4);
+							cn(-40 + i * 26, 60, 5.5, 3, 0xb5651d, 4, 4)
+						}
+					}
+				},
+				{
+					n: '大都市CBD',
+					sky: 0xb4d2ea,
+					g: 0x4a4d52,
+					f: 600,
+					b() {
+						for (let i = -5; i <= 5; i++)
+							for (let j = -5; j <= 5; j++) {
+								if (Math.abs(i) < 1 && Math.abs(j) < 1) continue;
+								const h = 30 + rnd() * rnd() * 230,
+									x = i * 42,
+									z = j * 42;
+								bx(x, z, 26, h, 26, new T.Color().setHSL(.56 + rnd() * .06, .25, .35 + rnd() * .3));
+								if (h > 150) cy(x, z, .3, 25, 0xcccccc, h)
+							}
+					}
+				},
+				{
+					n: '迪士尼乐园',
+					sky: 0x8fd0ff,
+					g: 0x7ac46a,
+					f: 520,
+					b() {
+						bx(0, -90, 34, 22, 20, 0xf6e8f2);
+						[-22, 22].forEach(x => {
+							cy(x, -90, 5, 34, 0xf8dcea);
+							cn(x, -90, 6.5, 14, 0x3a6fe0, 34)
+						});
+						cy(0, -90, 6, 48, 0xf8dcea);
+						cn(0, -90, 7.5, 20, 0xe0407a, 48);
+						const w = new T.Group(),
+							gs = [];
+						w.position.set(70, 22, -20);
+						W.add(w);
+						w.add(new T.Mesh(new T.TorusGeometry(20, .5, 8, 40), BM(0xffffff)));
+						for (let i = 0; i < 8; i++) {
+							const a = i * Math.PI / 4,
+								s = new T.Mesh(new T.BoxGeometry(.2, 40, .2), BM(0xffffff));
+							s.rotation.z = a;
+							w.add(s);
+							const g = new T.Mesh(new T.BoxGeometry(3, 3, 3), BM(C[i % 7]));
+							g.position.set(Math.cos(a) * 20, Math.sin(a) * 20, 0);
+							w.add(g);
+							gs.push(g)
+						}
+						cy(70, -20, 1, 22, 0xdddddd);
+						B.push({
+							x: 70,
+							z: -20,
+							w: 42,
+							d: 4,
+							h: 44
+						});
+						AN.push((t, dt) => {
+							w.rotation.z += dt * .15;
+							gs.forEach(g => g.rotation.z = -w.rotation.z)
+						});
+						for (let i = 0; i < 3; i++) M(new T.TorusGeometry(14, .6, 6, 30, Math.PI), 0xe53935, -60 + i * 28, 0,
+							50);
+						sc(14, 20, 110, (x, z) => cn(x, z, 5, 8, pick(C), 0, 8));
+						sc(30, 15, 100, (x, z) => sp(x, 6 + rnd() * 10, z, 1, pick(C)))
+					}
+				},
+				{
+					n: '月球表面',
+					sky: 0,
+					g: 0x8d8d8d,
+					f: 0,
+					l: .55,
+					s: 1.2,
+					b() {
+						stars();
+						sp(-260, 170, -420, 45, 0, 1, new T.MeshLambertMaterial({
+							color: 0x3a78d8,
+							emissive: 0x112244
+						}));
+						sc(45, 12, 300, (x, z) => {
+							const r = 3 + rnd() * 14;
+							dc(x, z, r, 0x6e6e6e);
+							rn(r, r * 1.25, 0x9c9c9c, .07, x, z)
+						});
+						sc(60, 10, 250, (x, z) => sp(x, .5, z, .6 + rnd() * 2, 0x777777, .7));
+						M(new T.SphereGeometry(9, 20, 10, 0, 6.283, 0, 1.571), 0xdfe4ea, 40, 0, -30);
+						B.push({
+							x: 40,
+							z: -30,
+							w: 18,
+							d: 18,
+							h: 9
+						});
+						cy(10, -12, .08, 4, 0xffffff);
+						bx(10.9, -12, 1.6, 1, .05, 0xe53935, 3)
+					}
+				},
+				{
+					n: '私人超级豪宅',
+					sky: 0xa8d8f5,
+					g: 0x68b050,
+					f: 450,
+					b() {
+						bx(0, -60, 50, 24, 26, 0xf4f1ea);
+						bx(-34, -60, 20, 10, 20, 0xf4f1ea);
+						bx(34, -60, 20, 10, 20, 0xf4f1ea);
+						bx(0, -60, 52, 1.2, 28, 0x3a3f48, 24);
+						bx(0, -46.5, 34, 8, 1, 0x7ec8f0, 4);
+						for (let i = -3; i <= 3; i++) cy(i * 5, -45, .7, 12, 0xffffff);
+						pl(34, 14, 0x38c6e8, 50, -15, .08);
+						pl(38, 18, 0xf0ece0, 50, -15, .07);
+						pl(10, 100, 0x777777, 0, -15);
+						sc(40, 18, 130, (x, z) => {
+							if (z > -50 || Math.abs(x) > 45) tree(x, z, 1 + rnd() * .5, pick([0x2f6b34, 0x3e8a3e]))
+						});
+						[
+							[6, -6, 0xd32f2f],
+							[14, -8, 0x1e88e5],
+							[24, -7, 0xfdd835]
+						].forEach(([x, z, c]) => bx(x, z, 4.2, 1.1, 1.8, c, .2, null, 0))
+					}
+				},
+				{
+					n: '大型高尔夫球场',
+					sky: 0x9fd8f8,
+					g: 0x4ea84a,
+					f: 480,
+					b() {
+						pl(40, 360, 0x69cf5a, 0, -40);
+						pl(30, 200, 0x69cf5a, 60, 60);
+						[
+							[0, -190],
+							[60, -100],
+							[-70, -60],
+							[110, 60]
+						].forEach(([x, z]) => {
+							dc(x, z, 12, 0x86ee6c, .08);
+							cy(x, z, .06, 6, 0xffffff);
+							bx(x + 1, z, 2, 1.2, .05, 0xe53935, 5)
+						});
+						sc(14, 25, 200, (x, z) => dc(x, z, 3 + rnd() * 4, 0xf2e4a8, .07));
+						sc(5, 30, 200, (x, z) => dc(x, z, 8 + rnd() * 8, 0x3a9ad9, .07));
+						sc(80, 25, 250, (x, z) => tree(x, z, 1 + rnd() * .6));
+						bx(-50, 50, 26, 8, 14, 0xe8dcc0);
+						bx(-50, 50, 28, 1, 16, 0x8a3a2a, 8)
+					}
+				},
+				{
+					n: '西部田园牧场',
+					sky: 0xf2cf9a,
+					g: 0xbfa755,
+					f: 460,
+					b() {
+						bx(-35, -50, 24, 12, 16, 0xa5281c);
+						bx(-35, -50, 26, 1.5, 18, 0x5c2018, 12);
+						cy(-8, -55, 4, 18, 0xc4c8cc);
+						sp(-8, 18, -55, 4, 0xb0b4b8, .8);
+						cy(40, -40, .7, 22, 0x888888);
+						const wm = new T.Group();
+						wm.position.set(40, 22, -39);
+						W.add(wm);
+						for (let i = 0; i < 4; i++) {
+							const g = new T.Group(),
+								b = new T.Mesh(new T.BoxGeometry(.8, 9, .1), mat(0xdddddd));
+							b.position.y = 4.5;
+							g.rotation.z = i * 1.571;
+							g.add(b);
+							wm.add(g)
+						}
+						AN.push((t, dt) => wm.rotation.z -= dt * 1.5);
+						for (let i = 0; i < 30; i++) bx(-60 + i * 4.2, 20, .25, 1.5, .25, 0x8a6a40, 0, null, 0);
+						bx(0, 20, 126, .2, .1, 0x8a6a40, 1.1);
+						sc(24, 20, 110, (x, z) => bx(x, z, 2.4, 1.3, 1, rnd() > .5 ? 0xf5f5f5 : 0x4a3020, .6));
+						sc(10, 15, 90, (x, z) => cy(x, z, 1.6, 2.2, 0xd8b84a));
+						sc(8, 260, 380, (x, z) => cn(x, z, 50 + rnd() * 40, 70 + rnd() * 60, 0x9a6a48))
+					}
+				},
+				{
+					n: '马术赛马场',
+					sky: 0xa8d8f2,
+					g: 0x56a846,
+					f: 480,
+					b() {
+						rn(70, 98, 0xb98a52, .07);
+						rn(69.3, 70, 0xffffff, .09);
+						rn(98, 98.7, 0xffffff, .09);
+						bx(0, -135, 110, 18, 16, 0xd0d4da);
+						bx(0, -135, 118, 1.5, 20, 0x3a5fa0, 18);
+						const hg = new T.Group();
+						W.add(hg);
+						for (let i = 0; i < 6; i++) {
+							const a = i * 1.05,
+								h = new T.Group(),
+								c = pick([0x7a4a2a, 0x2a1a10, 0xc8a060]);
+							h.position.set(Math.cos(a) * 84, 0, Math.sin(a) * 84);
+							h.rotation.y = -a;
+							[
+								[0, 1.4, 0, 1.1, 1.1, 2.8, c],
+								[0, 2.2, 1.5, .5, 1.2, .6, c],
+								[0, 2.6, 0, .6, .9, .7, pick(C)],
+								[-.35, .5, -.9, .2, 1, .2, c],
+								[.35, .5, .9, .2, 1, .2, c]
+							].forEach(([x, y, z, w, hh, d, cc]) => {
+								const m = new T.Mesh(new T.BoxGeometry(w, hh, d), mat(cc));
+								m.position.set(x, y, z);
+								h.add(m)
+							});
+							hg.add(h)
+						}
+						AN.push((t, dt) => hg.rotation.y -= dt * .22);
+						for (let i = 0; i < 12; i++) {
+							const a = i * .52 + .2;
+							bx(Math.cos(a) * 84, Math.sin(a) * 84, .4, 1.3, 5, i % 2 ? 0xe53935 : 0xffffff, 0, null, 0)
+						}
+					}
+				},
+				{
+					n: '超大演唱会现场',
+					sky: 0x0a0a1e,
+					g: 0x262633,
+					f: 500,
+					l: .45,
+					s: .2,
+					b() {
+						stars();
+						bx(0, -75, 90, 5, 34, 0x1c1c28);
+						bx(0, -92, 70, 34, 1, 0, 6, BM(0xff2d95));
+						bx(-46, -92, 18, 28, 1, 0, 6, BM(0x2dd4ff));
+						bx(46, -92, 18, 28, 1, 0, 6, BM(0x2dd4ff));
+						bx(0, -60, 92, 1, 2, 0x888888, 34);
+						const im = new T.InstancedMesh(new T.BoxGeometry(.6, 1.7, .6), mat(0xffffff), 2000),
+							o = new T.Object3D();
+						for (let i = 0; i < 2000; i++) {
+							o.position.set((rnd() - .5) * 100, .85, -12 - rnd() * 42);
+							o.updateMatrix();
+							im.setMatrixAt(i, o.matrix);
+							im.setColorAt(i, new T.Color(pick(C)))
+						}
+						W.add(im);
+						const bm = [];
+						for (let i = 0; i < 6; i++) {
+							const g = new T.Group();
+							g.position.set(-40 + i * 16, 6, -75);
+							const c = new T.Mesh(new T.ConeGeometry(5, 80, 16, 1, true), new T.MeshBasicMaterial({
+								color: pick(C),
+								transparent: true,
+								opacity: .22,
+								depthWrite: false,
+								side: 2
+							}));
+							c.rotation.z = Math.PI;
+							c.position.y = 40;
+							g.add(c);
+							W.add(g);
+							bm.push(g)
+						}
+						AN.push(t => bm.forEach((g, i) => {
+							g.rotation.x = Math.sin(t * 1.3 + i) * .6;
+							g.rotation.z = Math.cos(t + i * 2) * .6
+						}))
+					}
+				},
+				{
+					n: '巨型足球场',
+					sky: 0x9fd2f2,
+					g: 0x808890,
+					f: 500,
+					b() {
+						pl(105, 68, 0x2f9d3c, 0, 0, .07);
+						[
+							[105, .4, 0, -34],
+							[105, .4, 0, 34],
+							[.4, 68, -52.5, 0],
+							[.4, 68, 52.5, 0],
+							[.4, 68, 0, 0]
+						].forEach(([w, d, x, z]) => pl(w, d, 0xffffff, x, z, .09));
+						rn(9, 9.4, 0xffffff, .09);
+						[-1, 1].forEach(s => {
+							bx(s * 53.5, 0, .3, 2.4, 7.3, 0xffffff, 0, null, 0);
+							bx(s * 53.5, 0, .3, .2, 7.3, 0xffffff, 2.4)
+						});
+						for (let i = 0; i < 3; i++) {
+							const r = 75 + i * 9;
+							M(new T.CylinderGeometry(r + 9, r, 10, 48, 1, true), 0, 0, i * 10 + 5, 0, new T
+								.MeshLambertMaterial({
+									color: pick([0xc62828, 0x1565c0, 0xeeeeee]),
+									side: 2
+								}))
+						} [
+							[-100, -80],
+							[100, -80],
+							[-100, 80],
+							[100, 80]
+						].forEach(([x, z]) => {
+							cy(x, z, 2, 50, 0x999999);
+							bx(x, z, 10, 5, 2, 0, 50, BM(0xffffe0))
+						})
+					}
+				},
+				{
+					n: '雪山滑雪场',
+					sky: 0xcfe4f6,
+					g: 0xf4f8fc,
+					f: 420,
+					b() {
+						sc(14, 140, 340, (x, z) => {
+							const h = 90 + rnd() * 110;
+							cn(x, z, h * .6, h, 0x8a96a8);
+							cn(x, z, h * .27, h * .45, 0xffffff, h * .55)
+						});
+						sc(70, 15, 170, (x, z) => tree(x, z, 1 + rnd() * .5, 0x2a5a46));
+						bx(-40, -40, 22, 9, 14, 0x7a4a2a);
+						bx(-40, -40, 24, 1.2, 16, 0xe8e8f0, 9);
+						for (let i = 0; i < 7; i++) cy(30 + i * 14, -20 - i * 10, .3, 12, 0x555555)
+					}
+				},
+				{
+					n: '沙漠金字塔',
+					sky: 0xf3d9a2,
+					g: 0xe0be78,
+					f: 480,
+					b() {
+						[
+							[-60, -110, 70],
+							[30, -140, 55],
+							[100, -90, 40]
+						].forEach(([x, z, s]) => {
+							const m = M(new T.ConeGeometry(s * .72, s, 4), 0xd8b068, x, s / 2, z);
+							m.rotation.y = Math.PI / 4;
+							B.push({
+								x,
+								z,
+								w: s * 1.02,
+								d: s * 1.02,
+								h: s * .7
+							})
+						});
+						sc(40, 15, 300, (x, z) => sp(x, 0, z, 10 + rnd() * 20, 0xd9b46c, .22));
+						sc(30, 15, 200, (x, z) => {
+							cy(x, z, .4, 3, 0x3a7a3a);
+							cy(x + .9, z, .2, 1.4, 0x3a7a3a, 1.4)
+						});
+						dc(60, 30, 10, 0x2f8fc0, .07);
+						for (let i = 0; i < 6; i++) palm(52 + i * 4, 22 + (i % 2) * 16)
+					}
+				},
+				{
+					n: '热带雨林',
+					sky: 0x9fd8c4,
+					g: 0x2f6a30,
+					f: 200,
+					b() {
+						pl(26, 700, 0x2f8fb0, 40, 0, .07);
+						sc(130, 10, 220, (x, z) => {
+							if (Math.abs(x - 40) < 18) return;
+							const h = 10 + rnd() * 14;
+							cy(x, z, .8, h, 0x5a3e22, 0, .5);
+							sp(x, h + 3, z, 5 + rnd() * 3, pick([0x1e5a24, 0x2a7a2e, 0x3a8a34]), .8)
+						});
+						sc(30, 8, 120, (x, z) => sp(x, .8, z, 1 + rnd() * 1.5, 0x6b6f66, .7))
+					}
+				},
+				{
+					n: '国际货运港口',
+					sky: 0xb8d4e8,
+					g: 0x7e8186,
+					f: 500,
+					sea: 1,
+					b() {
+						pl(1400, 500, 0x1a6a9a, 0, -350, .05);
+						for (let i = 0; i < 40; i++) {
+							const x = -80 + (i % 8) * 14,
+								z = 25 + ((i / 8) | 0) * 8,
+								n = 1 + ((rnd() * 4) | 0);
+							for (let k = 0; k < n; k++) bx(x, z, 12, 2.6, 2.6, pick(C), k * 2.6, null, 0);
+							B.push({
+								x,
+								z,
+								w: 12,
+								d: 2.6,
+								h: n * 2.6
+							})
+						} [-100, 100].forEach(x => {
+							[-8, 8].forEach(dz => cy(x, -60 + dz, 1.5, 40, 0xe0a020));
+							bx(x, -60, 4, 3, 60, 0xe0a020, 40)
+						});
+						bx(-30, -150, 160, 14, 26, 0x8a2a22);
+						bx(40, -150, 22, 22, 20, 0xf2f2f2, 14)
+					}
+				},
+				{
+					n: '国际机场',
+					sky: 0xb4d6f0,
+					g: 0x6aa05a,
+					f: 520,
+					b() {
+						pl(30, 600, 0x303338, 60, 0);
+						for (let i = 0; i < 30; i++) pl(1, 8, 0xffffff, 60, -280 + i * 19, .08);
+						pl(10, 500, 0x45484d, 30, 0);
+						bx(-70, -70, 90, 14, 24, 0xcfd6de);
+						bx(-70, -70, 92, 1.4, 26, 0x3a5a90, 14);
+						cy(-20, -110, 3, 40, 0xdddddd);
+						bx(-20, -110, 10, 8, 10, 0x4a90c0, 40);
+						[
+							[45, -100],
+							[60, 40],
+							[75, 120]
+						].forEach(([x, z]) => {
+							const f = M(new T.CylinderGeometry(2, 2, 26, 12), 0xf4f4f4, x, 4, z);
+							f.rotation.x = Math.PI / 2;
+							bx(x, z - 2, 30, .4, 5, 0x3a5fa0, 3.8);
+							bx(x, z + 11, 8, .3, 3, 0x3a5fa0, 5);
+							bx(x, z + 11, .3, 5, 3, 0x3a5fa0, 4);
+							B.push({
+								x,
+								z,
+								w: 30,
+								d: 26,
+								h: 8
+							})
+						})
+					}
+				},
+				{
+					n: '中世纪城堡',
+					sky: 0xa8cde8,
+					g: 0x6a9a4a,
+					f: 450,
+					b() {
+						rn(46, 58, 0x2f78b8, .07, 0, -80);
+						[
+							[-1, 0],
+							[1, 0],
+							[0, -1],
+							[0, 1]
+						].forEach(([a, b]) => bx(a * 30, -80 + b * 30, a ? 2 : 60, 14, a ? 60 : 2, 0x9a9690));
+						[
+							[-30, -110],
+							[30, -110],
+							[-30, -50],
+							[30, -50]
+						].forEach(([x, z]) => {
+							cy(x, z, 5, 22, 0xa8a49e);
+							cn(x, z, 6.5, 10, 0xb03a30, 22)
+						});
+						bx(0, -80, 18, 28, 18, 0x8e8a84);
+						cn(0, -80, 13, 12, 0xb03a30, 28, 4);
+						sc(18, 60, 140, (x, z) => {
+							bx(x, z, 6, 5, 6, 0xd8c8a8);
+							cn(x, z, 5, 4, 0x8a3a2a, 5, 4)
+						});
+						sc(40, 40, 200, (x, z) => tree(x, z))
+					}
+				},
+				{
+					n: '火星基地',
+					sky: 0xd98a5a,
+					g: 0xb0532c,
+					f: 260,
+					l: .85,
+					b() {
+						sc(70, 10, 250, (x, z) => sp(x, .8, z, .8 + rnd() * 3, 0x7a3a22, .7));
+						sc(10, 200, 360, (x, z) => cn(x, z, 50 + rnd() * 50, 60 + rnd() * 70, 0x8a4224));
+						[
+							[40, -40, 10],
+							[62, -40, 7],
+							[40, -62, 7]
+						].forEach(([x, z, r]) => {
+							M(new T.SphereGeometry(r, 20, 10, 0, 6.283, 0, 1.571), 0xe8e0d8, x, 0, z);
+							B.push({
+								x,
+								z,
+								w: r * 2,
+								d: r * 2,
+								h: r
+							})
+						});
+						bx(51, -40, 12, 2, 2, 0xcccccc, .5);
+						for (let i = 0; i < 5; i++) bx(-30 + i * 8, -40, 6, .3, 4, 0x1a2a6a, 1.5)
+					}
+				},
+				{
+					n: '未来科幻城',
+					sky: 0x07041a,
+					g: 0x14122a,
+					f: 450,
+					l: .5,
+					s: .2,
+					b() {
+						stars();
+						for (let i = -4; i <= 4; i++)
+							for (let j = -4; j <= 4; j++) {
+								if (!i && !j) continue;
+								const x = i * 46 + rnd() * 6,
+									z = j * 46 + rnd() * 6,
+									h = 30 + rnd() * 170,
+									c = BM(pick([0xff2d95, 0x2dd4ff, 0x9d4dff, 0x39ff88]));
+								bx(x, z, 14, h, 14, 0x191a3a);
+								bx(x, z, 14.4, 2, 14.4, 0, h * .3, c);
+								bx(x, z, 14.4, 2, 14.4, 0, h * .7, c)
+							}
+						const rg = [0, 1, 2].map(i => M(new T.TorusGeometry(30 + i * 8, .8, 6, 50), 0, 0, 60 + i * 20, -100,
+							BM(C[i * 2])));
+						AN.push((t, dt) => rg.forEach((r, i) => {
+							r.rotation.x = Math.PI / 2 + Math.sin(t + i) * .3;
+							r.rotation.z += dt * (.3 + i * .2)
+						}))
+					}
+				},
+				{
+					n: '日本樱花与富士山',
+					sky: 0xcde8ff,
+					g: 0xb7d98a,
+					f: 700,
+					b() {
+						cn(0, -420, 150, 190, 0x4a5a8a);
+						cn(0, -420, 57, 72, 0xffffff, 118);
+						sc(70, 10, 200, (x, z) => {
+							cy(x, z, .4, 3, 0x5a3e2a);
+							sp(x, 5, z, 3.2, 0xf6a8c8, .85)
+						});
+						bx(-5, -30, .8, 9, .8, 0xd32f2f);
+						bx(5, -30, .8, 9, .8, 0xd32f2f);
+						bx(0, -30, 13, .8, 1, 0xd32f2f, 9);
+						for (let i = 0; i < 5; i++) bx(40, -50, 9 - i * 1.3, 3, 9 - i * 1.3, 0xb03a30, i * 3.6);
+						B.push({
+							x: 40,
+							z: -50,
+							w: 9,
+							d: 9,
+							h: 18
+						});
+						dc(-40, 20, 14, 0x3a8fcf, .07)
+					}
+				},
+				{
+					n: '大型炼油工业区',
+					sky: 0xbac2cb,
+					g: 0x6b6e66,
+					f: 380,
+					b() {
+						sc(14, 30, 120, (x, z) => cy(x, z, 6 + rnd() * 6, 10 + rnd() * 8, 0xdcdcdc));
+						[
+							[-60, -60],
+							[-30, -90],
+							[30, -80],
+							[70, -50]
+						].forEach(([x, z]) => {
+							cy(x, z, 2.5, 70, 0xc83a2a);
+							cy(x, z, 2.55, 10, 0xffffff, 50);
+							for (let k = 0; k < 3; k++) sp(x + k * 2, 76 + k * 8, z, 3 + k * 1.5, 0, .8, new T
+								.MeshBasicMaterial({
+									color: 0xaaaaaa,
+									transparent: true,
+									opacity: .5
+								}))
+						});
+						cy(100, -30, .6, 60, 0x888888);
+						const fm = M(new T.ConeGeometry(1.6, 5, 8), 0, 100, 62.5, -30, BM(0xff8a1a));
+						AN.push(t => fm.scale.y = 1 + .3 * Math.sin(t * 12));
+						sc(8, 40, 110, (x, z) => bx(x, z, 20, 8, 12, 0x8a9099));
+						bx(0, -40, 120, 1, 1, 0x9a9a9a, 6)
+					}
+				},
+				{
+					n: '国际空间站',
+					sky: 0x000004,
+					g: 0x9aa0a8,
+					f: 0,
+					l: .6,
+					s: 1.3,
+					b() {
+						stars();
+						M(new T.SphereGeometry(300, 40, 30), 0, -350, 260, -800, new T.MeshLambertMaterial({
+							color: 0x2a6cc8,
+							emissive: 0x0a2a5a
+						}));
+						M(new T.SphereGeometry(304, 40, 30), 0, -350, 260, -800, new T.MeshBasicMaterial({
+							color: 0xffffff,
+							transparent: true,
+							opacity: .18
+						}));
+						let m = M(new T.CylinderGeometry(4, 4, 50, 14), 0xe8eaee, 0, 6, -70);
+						m.rotation.z = Math.PI / 2;
+						B.push({
+							x: 0,
+							z: -70,
+							w: 50,
+							d: 8,
+							h: 10
+						});
+						m = M(new T.CylinderGeometry(3, 3, 40, 14), 0xdfe3e8, 0, 6, -70);
+						m.rotation.x = Math.PI / 2;
+						B.push({
+							x: 0,
+							z: -70,
+							w: 6,
+							d: 40,
+							h: 9
+						});
+						[-1, 1].forEach(s => bx(s * 45, -70, 28, .3, 12, 0x1a3a8a, 8))
+					}
+				}
+			];
+
+			function hurt(g, d) {
+				g.hp -= d;
+				if (g.hp <= 0 && !g.dead) {
+					g.dead = true;
+					WP.kills++;
+					g.mk.visible = false;
+					g.m.traverse(o => {
+						if (o.material && o.material.emissive) {
+							o.material.color.setHex(0x1a1a1a);
+							o.material.emissive.setHex(0)
+						}
+					});
+					g.m.scale.y = .5;
+					boom(g.m.position.clone().setY(1.5), .8)
+				}
+			}
+
+			function mkTargets(n) {
+				for (let i = 0; i < n; i++) {
+					let x, z, t = 0;
+					do {
+						const a = rnd() * 6.283,
+							r = 30 + rnd() * 70;
+						x = Math.cos(a) * r;
+						z = Math.sin(a) * r
+					} while (t++ < 40 && (B.some(b => Math.abs(x - b.x) < b.w / 2 + 3 && Math.abs(z - b.z) < b.d / 2 + 3) || SC[
+							SI].sea && z < -90));
+					const g = new T.Group(),
+						tm = mat(0xb03a2a);
+					tm.emissive.setHex(0x772200);
+					const mk = new T.Mesh(new T.ConeGeometry(.5, 1.2, 8), BM(0xff2222)),
+						br = new T.Mesh(new T.BoxGeometry(.2, .2, 1.6), tm),
+						tu = new T.Mesh(new T.CylinderGeometry(.6, .7, .6, 10), tm);
+					tu.position.y = .8;
+					br.position.set(0, .8, -1.1);
+					mk.position.y = 4;
+					mk.rotation.x = Math.PI;
+					g.add(new T.Mesh(new T.BoxGeometry(3, 1, 2), tm), tu, br, mk);
+					g.position.set(x, .5, z);
+					g.rotation.y = rnd() * 6.28;
+					W.add(g);
+					TG.push({
+						m: g,
+						hp: 3,
+						r: 2.4,
+						mk
+					})
+				}
+			}
+
+			function load(i) {
+				SI = i;
+				const s = SC[i];
+				W.traverse(o => {
+					o.geometry && o.geometry.dispose();
+					o.material && o.material.dispose && o.material.dispose()
+				});
+				W.clear();
+				AN.length = 0;
+				TG.length = 0;
+				FX.forEach(f => scene.remove(f.m));
+				FX.length = 0;
+				PR.concat(MS).forEach(p => scene.remove(p.m));
+				PR.length = MS.length = 0;
+				DEF.forEach(o => o.visible = !i);
+				B.length = 0;
+				if (!i) B.push(...B0);
+				scene.background = new T.Color(s.sky);
+				scene.fog = s.f ? new T.Fog(s.sky, s.f * .2, s.f) : null;
+				gr.material.color.setHex(s.g);
+				grid.visible = !i;
+				HL.intensity = s.l || .95;
+				sun.intensity = s.s ?? .7;
+				s.b && s.b();
+				mkTargets(8);
+				WP.kills = 0;
+				landed();
+				S.pos.set(0, G, 0);
+				S.yaw = 0;
+				sel.value = i;
+				snap = true;
+				toast('场景：' + s.n)
+			}
+			/* ---- 武器模型 ---- */
+			function mkMs(sc_, fl) {
+				const g = new T.Group(),
+					b = new T.Mesh(new T.CylinderGeometry(.12, .12, 1.4, 8).rotateX(Math.PI / 2), mat(0xeeeeee)),
+					n = new T.Mesh(new T.ConeGeometry(.12, .4, 8).rotateX(Math.PI / 2), mat(0xd32f2f)),
+					f = new T.Mesh(new T.BoxGeometry(.5, .03, .3), mat(0x444444)),
+					f2 = f.clone();
+				n.position.z = .9;
+				f.position.z = f2.position.z = -.55;
+				f2.rotation.z = Math.PI / 2;
+				g.add(b, n, f, f2);
+				if (fl) {
+					const e = new T.Mesh(new T.SphereGeometry(.2, 8, 6), BM(0xff9a20));
+					e.position.z = -.9;
+					e.scale.z = 2.5;
+					g.add(e)
+				}
+				g.scale.setScalar(sc_);
+				return g
+			}
+			const pods = [
+				[-.2, -.05],
+				[.2, -.05],
+				[-.2, -.09],
+				[.2, -.09]
+			].map(([x, y]) => {
+				const p = mkMs(.17);
+				p.position.set(x, y, -.05);
+				p.rotation.y = Math.PI;
+				body.add(p);
+				return p
+			});
+			const gun = new T.Group();
+			gun.position.set(.12, -.07, -.1);
+			body.add(gun);
+			for (let i = 0; i < 3; i++) {
+				const b = new T.Mesh(new T.CylinderGeometry(.01, .01, .32, 6).rotateX(Math.PI / 2), mat(0x222222)),
+					a = i * 2.094;
+				b.position.set(Math.cos(a) * .02, Math.sin(a) * .02, -.1);
+				gun.add(b)
+			}
+			const sg = new T.SphereGeometry(.3, 6, 5),
+				TB = new T.BoxGeometry(.06, .06, 2.2),
+				TBm = BM(0xffee66);
+
+			function puff(p, c = 0xcccccc, L = 1.2, s = 1) {
+				const m = new T.Mesh(sg, new T.MeshBasicMaterial({
+					color: c,
+					transparent: true,
+					opacity: .6,
+					depthWrite: false
+				}));
+				m.position.copy(p);
+				scene.add(m);
+				FX.push({
+					m,
+					t: 0,
+					L,
+					u: f => {
+						m.scale.setScalar(s * (1 + f * 3));
+						m.material.opacity = .6 * (1 - f);
+						m.position.y += .02
+					}
+				})
+			}
+
+			function spark(q) {
+				const f = new T.Mesh(sg, new T.MeshBasicMaterial({
+					color: 0xffaa33,
+					transparent: true
+				}));
+				f.position.copy(q);
+				scene.add(f);
+				FX.push({
+					m: f,
+					t: 0,
+					L: .25,
+					u: r => f.material.opacity = 1 - r
+				});
+				puff(q, 0x998877, .6, .6)
+			}
+
+			function boom(p, s = 1) {
+				const m = new T.Mesh(new T.SphereGeometry(1, 14, 10), new T.MeshBasicMaterial({
+					color: 0xffe080,
+					transparent: true,
+					opacity: .95
+				}));
+				m.position.copy(p);
+				scene.add(m);
+				FX.push({
+					m,
+					t: 0,
+					L: .7,
+					u: f => {
+						m.scale.setScalar(s * (1.5 + f * 5));
+						m.material.opacity = .95 * (1 - f);
+						m.material.color.setHex(f < .25 ? 0xffe080 : f < .5 ? 0xff8a20 : 0x802010)
+					}
+				});
+				for (let i = 0; i < 14; i++) {
+					const d = new T.Mesh(new T.BoxGeometry(.3, .3, .3), BM(pick([0xff8a20, 0x333333, 0xffd060])));
+					d.position.copy(p);
+					scene.add(d);
+					const v = new T.Vector3(rnd() - .5, rnd() * .9 + .2, rnd() - .5).multiplyScalar(22 * s);
+					FX.push({
+						m: d,
+						t: 0,
+						L: 1.2,
+						u: (f, dt) => {
+							v.y -= 25 * dt;
+							d.position.addScaledVector(v, dt);
+							d.rotation.x += dt * 8
+						}
+					})
+				}
+				for (let i = 0; i < 5; i++) puff(p.clone().add(new T.Vector3(rnd() * 3 - 1.5, rnd() * 3, rnd() * 3 - 1.5)),
+					0x444444, 2.2, 3 * s);
+				FL.position.copy(p);
+				FL.intensity = 6;
+				WP.shake = Math.max(WP.shake, clamp(1 - cam.position.distanceTo(p) / 150, 0, 1) * 1.2);
+				snd(90, .5, 1)
+			}
+			let AC;
+
+			function snd(f, d, n) {
+				try {
+					AC = AC || new AudioContext();
+					const t = AC.currentTime,
+						o = AC.createOscillator(),
+						g = AC.createGain();
+					o.type = n ? 'sawtooth' : 'square';
+					o.frequency.setValueAtTime(f, t);
+					o.frequency.exponentialRampToValueAtTime(f / 3, t + d);
+					g.gain.setValueAtTime(.1, t);
+					g.gain.exponentialRampToValueAtTime(.001, t + d);
+					o.connect(g).connect(AC.destination);
+					o.start();
+					o.stop(t + d)
+				} catch (e) {}
+			}
+
+			function lockT(d) {
+				let b = null,
+					bc = .93;
+				TG.forEach(g => {
+					if (g.dead) return;
+					const v = g.m.position.clone().sub(S.pos),
+						L = v.length();
+					if (L < 400 && L > 5) {
+						const c = v.normalize().dot(d);
+						if (c > bc) {
+							bc = c;
+							b = g
+						}
+					}
+				});
+				return b
+			}
+
+			function shoot(d, rg) {
+				const p = S.pos.clone().addScaledVector(rg, .22).addScaledVector(d, 1.2);
+				p.y -= .13;
+				const v = d.clone().add(new T.Vector3(rnd() - .5, rnd() - .5, rnd() - .5).multiplyScalar(.02)).normalize(),
+					m = new T.Mesh(TB, TBm);
+				m.position.copy(p);
+				m.quaternion.setFromUnitVectors(new T.Vector3(0, 0, 1), v);
+				scene.add(m);
+				PR.push({
+					m,
+					v: v.multiplyScalar(170),
+					t: 0
+				});
+				const f = new T.Mesh(sg, BM(0xffdd55));
+				f.position.copy(p);
+				scene.add(f);
+				FX.push({
+					m: f,
+					t: 0,
+					L: .05,
+					u() {}
+				});
+				FL.position.copy(p);
+				FL.intensity = 2.5;
+				WP.shake = Math.max(WP.shake, .08);
+				body.position.z = .03;
+				snd(300, .05, 0)
+			}
+			const hitAt = q => q.y <= .05 || B.some(b => Math.abs(q.x - b.x) < b.w / 2 && Math.abs(q.z - b.z) < b.d / 2 && q.y <
+				b.h);
+			act.missile = () => {
+				if (S.mode === 'landed' || WP.ms < 1) return;
+				const d = AIM.clone(),
+					i = 4 - WP.ms,
+					rg = new T.Vector3(Math.cos(S.yaw), 0, -Math.sin(S.yaw)),
+					m = mkMs(1, true);
+				WP.ms--;
+				WP.mt = 0;
+				m.position.copy(S.pos).addScaledVector(rg, (i % 2 ? 1 : -1) * .36).addScaledVector(d, .8);
+				m.position.y -= .12;
+				scene.add(m);
+				MS.push({
+					m,
+					v: d.clone().multiplyScalar(25).add(S.vel),
+					t: 0,
+					tg: lockT(d)
+				});
+				puff(m.position, 0xffffff, 1.5, 2);
+				FL.position.copy(m.position);
+				FL.intensity = 3;
+				WP.shake = .25;
+				snd(160, .6, 1)
+			};
+			/* ---- 红外 / 夜视 ---- */
+			const vst = document.createElement('style');
+			vst.textContent =
+				'#vis{position:absolute;inset:0;pointer-events:none;display:none;font:700 14px monospace;color:#7f7;text-shadow:0 0 4px #000}#vis:before{content:"";position:absolute;inset:0;background:radial-gradient(circle,transparent 55%,rgba(0,0,0,.85)),repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px)}#vis span{position:absolute;left:50%;bottom:64px;transform:translateX(-50%)}select{font:inherit;font-size:14px;padding:9px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:var(--glass);color:var(--tx)}select option{color:#000}';
+			document.head.appendChild(vst);
+			const vis = document.createElement('div');
+			vis.id = 'vis';
+			vis.innerHTML = '<span></span>';
+			rd.domElement.after(vis);
+			let VI = 0;
+			const VF = ['', 'grayscale(1) contrast(1.6) sepia(1) hue-rotate(-30deg) saturate(6)',
+					'grayscale(1) sepia(1) hue-rotate(55deg) saturate(5) brightness(2.2) contrast(1.4)'
+				],
+				VT = ['', 'IR 红外热成像', 'NV 夜视仪'];
+
+			function setV(v) {
+				VI = VI === v ? 0 : v;
+				rd.domElement.style.filter = VF[VI];
+				vis.style.display = VI ? 'block' : 'none';
+				vis.firstChild.textContent = VT[VI];
+				vis.style.color = VI == 1 ? '#fc8' : '#7f7'
+			}
+			act.ir = () => setV(1);
+			act.nv = () => setV(2);
+			act.next = () => load((SI + 1) % SC.length);
+			act.prev = () => load((SI + SC.length - 1) % SC.length);
+			Object.assign(ONCE, {
+				KeyG: 'missile',
+				KeyI: 'ir',
+				KeyN: 'nv',
+				BracketRight: 'next',
+				BracketLeft: 'prev'
+			});
+			const sel = document.createElement('select');
+			SC.forEach((s, i) => sel.add(new Option((i + 1) + '. ' + s.n, i)));
+			sel.onchange = () => {
+				load(+sel.value);
+				sel.blur()
+			};
+			$('bar').prepend(sel);
+			[
+				['prev', '◀'],
+				['next', '▶'],
+				['missile', '导弹 G'],
+				['ir', '红外 I'],
+				['nv', '夜视 N']
+			].forEach(([a, t]) => {
+				const b = document.createElement('button');
+				b.textContent = t;
+				b.onclick = () => act[a]();
+				$('bar').appendChild(b)
+			}); {
+				const b = document.createElement('button');
+				b.textContent = '机枪 F（按住）';
+				b.onpointerdown = e => {
+					e.preventDefault();
+					keys.KeyF = true
+				};
+				['pointerup', 'pointercancel', 'pointerleave'].forEach(v => b.addEventListener(v, () => keys.KeyF = false));
+				$('bar').appendChild(b)
+			}
+			/* ---- 每帧扩展 ---- */
+			const _upd = update,
+				_hud = hud;
+			update = function(dt) {
+				_upd(dt);
+				const t = performance.now() / 1000,
+					cp = Math.cos(S.gp),
+					rg = new T.Vector3(Math.cos(S.yaw), 0, -Math.sin(S.yaw)),
+					armed = S.mode !== 'landed';
+				AIM.set(-Math.sin(S.yaw) * cp, Math.sin(S.gp), -Math.cos(S.yaw) * cp);
+				AN.forEach(f => f(t, dt));
+				WP.gt -= dt;
+				if (keys.KeyF && armed && WP.ammo > 0 && WP.gt <= 0) {
+					WP.gt = .05;
+					WP.ammo--;
+					shoot(AIM, rg)
+				}
+				gun.rotation.z += (keys.KeyF && armed ? 35 : 0) * dt;
+				body.position.z *= Math.exp(-dt * 20);
+				if (!armed) WP.ammo = Math.min(500, WP.ammo + 120 * dt);
+				if (WP.ms < 4) {
+					WP.mt += dt * (armed ? 1 : 4);
+					if (WP.mt > 6) {
+						WP.mt = 0;
+						WP.ms++
+					}
+				}
+				pods.forEach((p, j) => p.visible = j >= 4 - WP.ms);
+				for (let i = PR.length - 1; i >= 0; i--) {
+					const p = PR[i],
+						q = p.m.position;
+					q.addScaledVector(p.v, dt);
+					p.t += dt;
+					let h = hitAt(q);
+					TG.forEach(g => {
+						if (!g.dead && q.distanceTo(g.m.position) < g.r) {
+							h = true;
+							hurt(g, 1)
+						}
+					});
+					if (h) spark(q);
+					if (h || p.t > 1.5) {
+						scene.remove(p.m);
+						PR.splice(i, 1)
+					}
+				}
+				for (let i = MS.length - 1; i >= 0; i--) {
+					const p = MS[i],
+						q = p.m.position;
+					p.t += dt;
+					if (p.tg && !p.tg.dead) {
+						const sp_ = p.v.length(),
+							to = p.tg.m.position.clone().sub(q).normalize();
+						p.v.normalize().lerp(to, Math.min(1, dt * 2.5)).normalize().multiplyScalar(sp_)
+					}
+					p.v.setLength(Math.min(95, p.v.length() + 90 * dt));
+					q.addScaledVector(p.v, dt);
+					p.m.lookAt(q.clone().add(p.v));
+					puff(q.clone().addScaledVector(p.v.clone().normalize(), -1), 0xdddddd, .9, .8);
+					if (p.t > .15 && (hitAt(q) || TG.some(g => !g.dead && q.distanceTo(g.m.position) < 3.5) || p.t > 6)) {
+						boom(q.clone(), 1.3);
+						TG.forEach(g => {
+							const dd = g.m.position.distanceTo(q);
+							if (!g.dead && dd < 9) hurt(g, dd < 4 ? 3 : 2)
+						});
+						scene.remove(p.m);
+						MS.splice(i, 1)
+					}
+				}
+				for (let i = FX.length - 1; i >= 0; i--) {
+					const f = FX[i];
+					f.t += dt;
+					const r = f.t / f.L;
+					f.u(r, dt);
+					if (r >= 1) {
+						scene.remove(f.m);
+						f.m.material.dispose();
+						FX.splice(i, 1)
+					}
+				}
+				FL.intensity *= Math.exp(-dt * 10);
+				if (WP.shake > .001) {
+					cam.position.add(new T.Vector3(rnd() - .5, rnd() - .5, rnd() - .5).multiplyScalar(WP.shake * .6));
+					WP.shake *= Math.exp(-dt * 6)
+				}
+			};
+			hud = function() {
+				_hud();
+				$('hud').innerHTML +=
+					`<br>场景　${SI+1}/${SC.length} ${SC[SI].n}<br>机枪　${WP.ammo|0}　导弹　${WP.ms}/4${lockT(AIM)?' 🔒锁定':''}<br>击毁　${WP.kills}/${TG.length}${VI?'<br>'+VT[VI]:''}`
+			};
+			load(0);
+			hud();
+			toast('按 T 起飞');
+			requestAnimationFrame(loop);
+		</script>
+	</body>
 </html>
