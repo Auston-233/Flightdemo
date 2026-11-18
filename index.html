@@ -195,23 +195,109 @@
 					bottom: 8px
 				}
 			}
+
+			/* ---- 折叠面板 ---- */
+			#hudbox {
+				position: absolute;
+				left: 10px;
+				top: 10px;
+				padding: 8px 12px;
+				min-width: 150px
+			}
+
+			#hud {
+				font-size: 13px;
+				line-height: 1.6;
+				margin-top: 4px
+			}
+
+			#hud b {
+				font-size: 16px;
+				color: var(--ac)
+			}
+
+			.fh {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 10px;
+				cursor: pointer;
+				font-size: 13px;
+				font-weight: 600;
+				outline: none
+			}
+
+			.fh i {
+				width: 7px;
+				height: 7px;
+				border-right: 2px solid var(--ac);
+				border-bottom: 2px solid var(--ac);
+				transform: rotate(45deg);
+				margin: -3px 2px 0 0;
+				transition: transform .2s
+			}
+
+			.fold.closed .fh i {
+				transform: rotate(-45deg);
+				margin: 0 2px 0 0
+			}
+
+			.fold.closed .fb {
+				display: none
+			}
+
+			.fold.closed {
+				min-width: 0
+			}
+
+			.fb {
+				margin-top: 4px
+			}
+
+			#help {
+				font-size: 12px
+			}
+
+			#bar button.off {
+				opacity: .6
+			}
+
+			/* 信息面板加深背景，折叠后也清晰可读 */
+			#hudbox,
+			#help {
+				background: rgba(8, 12, 18, .88);
+				backdrop-filter: blur(8px);
+				border-color: rgba(255, 255, 255, .22);
+				box-shadow: 0 2px 10px rgba(0, 0, 0, .45)
+			}
+
+			.fh {
+				color: #fff;
+				text-shadow: 0 1px 3px #000
+			}
+
+			#hud {
+				color: #ffffff;
+				font-weight:999;
+				text-shadow: 0 1px 2px rgba(0, 0, 0, .6)
+			}
 		</style>
 	</head>
 	<body>
 		<div id="app">
 			<div id="fpv"></div>
-			<div id="hud" class="g"></div>
-			<details id="help" class="g" open>
-				<summary>操作说明</summary>
+			<div id="hudbox" class="g fold"><div class="fh" tabindex="0" role="button" title="点击折叠/展开">飞行信息<i></i></div><div class="fb"><div id="hud"></div></div></div>
+			<div id="help" class="g fold"><div class="fh" tabindex="0" role="button" title="点击折叠/展开">操作说明<i></i></div><div class="fb">
+				
 				<b>W/S</b> 前进/后退　<b>A/D</b> 左移/右移<br>
 				<b>↑/空格</b> 上升　<b>↓/Shift</b> 下降<br>
 				<b>←/Q</b> 左转　<b>→/E</b> 右转<br>
 				<b>T</b> 起飞　<b>L</b> 降落　<b>H</b> 悬停刹车<br>
 				<b>O</b> 环绕（A/D 换向，W/S 调半径）<br>
 				<b>R</b> 一键返航　<b>V</b> 切换视角<br>
-				<b>C</b> 切换档位　<b>Z/X</b> 云台俯仰<br><b>F</b> 机枪(按住)　<b>G</b> 发射导弹<br><b>I</b> 红外热成像　<b>N</b> 夜视仪<br><b>[ /
+				<b>C</b> 切换档位　<b>Z/X</b> 云台俯仰<br><b>F</b> 机枪(按住)　<b>G</b> 发射导弹<br><b>I</b> 红外热成像　<b>N</b> 夜视仪<br><b>M</b> 音效开关<br><b>[ /
 					]</b> 切换场景（共22个）
-			</details>
+			</div></div>
 			<div id="toast"></div>
 			<div id="pl" class="pad"></div>
 			<div id="pr" class="pad"></div>
@@ -1699,6 +1785,7 @@
 			let AC;
 
 			function snd(f, d, n) {
+				if (window.__mute) return;
 				try {
 					AC = AC || new AudioContext();
 					const t = AC.currentTime,
@@ -1938,6 +2025,1091 @@
 				$('hud').innerHTML +=
 					`<br>场景　${SI+1}/${SC.length} ${SC[SI].n}<br>机枪　${WP.ammo|0}　导弹　${WP.ms}/4${lockT(AIM)?' 🔒锁定':''}<br>击毁　${WP.kills}/${TG.length}${VI?'<br>'+VT[VI]:''}`
 			};
+			/* ===== 折叠面板 ===== */
+			document.querySelectorAll('.fh').forEach(h => {
+				const tg = () => h.parentElement.classList.toggle('closed');
+				h.addEventListener('click', tg);
+				h.addEventListener('keydown', e => {
+					if (e.key === 'Enter') {
+						e.preventDefault();
+						e.stopPropagation();
+						tg()
+					}
+				})
+			});
+			if (matchMedia('(pointer:coarse)').matches) $('help').classList.add('closed'); // 触屏默认收起操作说明
+
+			/* ===== 无人机飞行音效（音量随速度增大，整体保持安静） ===== */
+			const SND = {
+					on: true,
+					vi: 0,
+					ti: 0,
+					ok: false
+				},
+				VOLS = [
+					['低', .45],
+					['中', .75],
+					['高', 1]
+				],
+				TIMS = [{
+					n: '标准',
+					base: 150,
+					type: 'sawtooth',
+					lp: 900,
+					wd: 1
+				}, {
+					n: '低沉',
+					base: 95,
+					type: 'triangle',
+					lp: 650,
+					wd: .8
+				}, {
+					n: '竞速',
+					base: 230,
+					type: 'sawtooth',
+					lp: 1500,
+					wd: 1.2
+				}];
+			let AU = null;
+
+			function aInit() {
+				try {
+					AC = AC || new AudioContext();
+					if (AC.state === 'suspended') AC.resume();
+					if (AU) return;
+					const comp = AC.createDynamicsCompressor(),
+						master = AC.createGain();
+					master.gain.value = .6; // 总音量上限，避免过大
+					comp.connect(master).connect(AC.destination);
+					const lp = AC.createBiquadFilter();
+					lp.type = 'lowpass';
+					lp.frequency.value = 900;
+					const rg = AC.createGain();
+					rg.gain.value = 0;
+					lp.connect(rg).connect(comp);
+					const oscs = [1, 1.008, 1.5, 2.02].map((r, i) => {
+						const o = AC.createOscillator(),
+							g = AC.createGain();
+						o.type = 'sawtooth';
+						o.frequency.value = 150 * r;
+						g.gain.value = [.5, .4, .18, .1][i];
+						o.connect(g).connect(lp);
+						o.start();
+						return {
+							o,
+							r
+						}
+					});
+					const nb = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate),
+						d = nb.getChannelData(0);
+					for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+					const ns = AC.createBufferSource();
+					ns.buffer = nb;
+					ns.loop = true;
+					const bp = AC.createBiquadFilter();
+					bp.type = 'bandpass';
+					bp.frequency.value = 500;
+					bp.Q.value = .6;
+					const wg = AC.createGain();
+					wg.gain.value = 0;
+					ns.connect(bp).connect(wg).connect(comp);
+					ns.start();
+					AU = {
+						oscs,
+						lp,
+						rg,
+						bp,
+						wg
+					};
+					SND.ok = true
+				} catch (e) {}
+			}
+			['pointerdown', 'keydown'].forEach(v => addEventListener(v, aInit));
+
+			function audioUpdate() {
+				if (!SND.ok || !AU || AC.state !== 'running') return;
+				const tm = TIMS[SND.ti],
+					spin = clamp(S.rot / 55, 0, 1),
+					sn = clamp(S.vel.length() / 16, 0, 1),
+					vol = SND.on ? VOLS[SND.vi][1] : 0,
+					t = AC.currentTime,
+					fr = tm.base * (.55 + .45 * spin) * (1 + .4 * sn + .12 * clamp(S.vel.y / 6, -1, 1));
+				AU.oscs.forEach(({
+					o,
+					r
+				}) => {
+					o.type = tm.type;
+					o.frequency.setTargetAtTime(fr * r, t, .08)
+				});
+				AU.lp.frequency.setTargetAtTime(tm.lp * (.8 + .8 * sn), t, .1);
+				// 悬停时很轻，随速度逐渐增大；最大约 0.1
+				AU.rg.gain.setTargetAtTime(vol * spin * (.03 + .07 * sn), t, .12);
+				AU.bp.frequency.setTargetAtTime(350 + 900 * sn, t, .1);
+				AU.wg.gain.setTargetAtTime(vol * spin * sn * sn * .05 * tm.wd, t, .15)
+			}
+			const _upd2 = update;
+			update = function(dt) {
+				_upd2(dt);
+				audioUpdate()
+			};
+			const sb = {};
+
+			function sndLabels() {
+				sb.on.textContent = SND.on ? '🔊 音效 M' : '🔇 音效 M';
+				sb.on.classList.toggle('off', !SND.on);
+				sb.vol.textContent = '音量：' + VOLS[SND.vi][0];
+				sb.tim.textContent = '音色：' + TIMS[SND.ti].n
+			}
+			act.sound = () => {
+				aInit();
+				SND.on = !SND.on;
+				window.__mute = !SND.on;
+				sndLabels();
+				toast(SND.on ? '音效开启' : '音效关闭')
+			};
+			act.vol = () => {
+				aInit();
+				SND.vi = (SND.vi + 1) % VOLS.length;
+				if (!SND.on) act.sound();
+				sndLabels();
+				toast('音量：' + VOLS[SND.vi][0])
+			};
+			act.tim = () => {
+				aInit();
+				SND.ti = (SND.ti + 1) % TIMS.length;
+				sndLabels();
+				toast('音色：' + TIMS[SND.ti].n)
+			};
+			ONCE.KeyM = 'sound';
+			[
+				['on', 'sound'],
+				['vol', 'vol'],
+				['tim', 'tim']
+			].forEach(([k, a]) => {
+				const b = document.createElement('button');
+				b.onclick = () => act[a]();
+				sb[k] = b;
+				$('bar').appendChild(b)
+			});
+						/* ===== 会动的角色：每个场景都有各自的居民 / 动物 / 车辆 ===== */
+			const R = (a, b) => a + rnd() * (b - a),
+				P = a => a[(rnd() * a.length) | 0],
+				SK = [0xf0c8a0, 0xd9a77a, 0x8d5a3a, 0xffdcb8],
+				lm = c => new T.MeshLambertMaterial({
+					color: c
+				}),
+				pt = (p, g, c, x, y, z) => {
+					const m = new T.Mesh(g, lm(c));
+					m.position.set(x, y, z);
+					p.add(m);
+					return m
+				},
+				BG = (w, h, d) => new T.BoxGeometry(w, h, d),
+				SG = r => new T.SphereGeometry(r, 10, 8),
+				limb = (p, x, y, w, h, c) => {
+					const g = new T.Group();
+					g.position.set(x, y, 0);
+					p.add(g);
+					pt(g, BG(w, h, w), c, 0, -h / 2, 0);
+					return g
+				},
+				hitB = (x, z, m = 1) => B.some(b => Math.abs(x - b.x) < b.w / 2 + m && Math.abs(z - b.z) < b.d / 2 + m),
+				okD = (x, z) => !(SC[SI].sea && z < -92) && Math.hypot(x, z) < 150;
+
+			function biped(o = {}) {
+				const g = new T.Group(),
+					s = o.shirt ?? P(C),
+					pn = o.pants ?? P([0x333a5a, 0x4a3a2a, 0x222222, 0x556677]);
+				pt(g, BG(.5, .7, .3), s, 0, 1.25, 0);
+				const hd = pt(g, SG(.22), o.skin ?? P(SK), 0, 1.8, 0);
+				if (o.hair != null) pt(g, new T.SphereGeometry(.235, 10, 8, 0, 6.283, 0, 1.4), o.hair, 0, 1.82, 0);
+				if (o.hat != null) {
+					pt(g, new T.CylinderGeometry(.34, .34, .04, 12), o.hat, 0, 1.98, 0);
+					pt(g, new T.CylinderGeometry(.18, .2, .18, 12), o.hat, 0, 2.06, 0)
+				}
+				if (o.ears != null) {
+					hd.scale.setScalar(1.7);
+					[-1, 1].forEach(x => pt(hd, SG(.45), o.ears, x * .8, .7, 0))
+				}
+				if (o.astro) {
+					pt(g, BG(.3, .16, .12), 0xd4a017, 0, 1.8, .16);
+					pt(g, BG(.4, .6, .2), 0xdddddd, 0, 1.3, -.25)
+				}
+				const e = {
+					g: new T.Group(),
+					legs: [limb(g, -.14, .9, .2, .9, pn), limb(g, .14, .9, .2, .9, pn)],
+					arms: [limb(g, -.35, 1.58, .15, .62, s), limb(g, .35, 1.58, .15, .62, s)],
+					k: 'b'
+				};
+				g.scale.setScalar(o.s || 1.5);
+				e.g.add(g);
+				return e
+			}
+
+			function quad(o) {
+				const g = new T.Group(),
+					lh = o.lh || .6,
+					w = o.w || .5,
+					h = o.h || .5,
+					l = o.l || 1.1,
+					c2 = o.c2 ?? o.c,
+					nk = o.neck || 0;
+				pt(g, BG(w, h, l), o.c, 0, lh + h / 2, 0);
+				if (nk) pt(g, BG(w * .4, nk, w * .4), o.c, 0, lh + h + nk / 2 - .05, l / 2 - .1);
+				const hy = lh + h * .8 + nk,
+					hz = l / 2 + .2;
+				pt(g, BG(w * .7, w * .7, w * .9), c2, 0, hy, hz);
+				[-1, 1].forEach(x => pt(g, BG(.08, .14, .05), o.c, x * w * .25, hy + w * .45, hz - .1));
+				pt(g, BG(.06, .06, .4), c2, 0, lh + h * .8, -l / 2 - .15);
+				if (o.hump) pt(g, SG(w * .6), o.c, 0, lh + h + .1, 0);
+				for (let i = 0; i < (o.spots || 0); i++) pt(g, BG(.2, .08, .25), 0x222222, R(-w / 3, w / 3), lh + h + .02, R(-l / 3, l / 3));
+				const legs = [
+					[-1, 1],
+					[1, 1],
+					[-1, -1],
+					[1, -1]
+				].map(([a, b]) => limb(g, a * w * .35, lh, .12, lh, c2));
+				g.scale.setScalar(o.s || 1.3);
+				const e = {
+					g: new T.Group(),
+					legs,
+					k: 'q',
+					top: (lh + h) * (o.s || 1.3)
+				};
+				e.g.add(g);
+				return e
+			}
+
+			function bird(c, s = 1, c2 = c, tl = .4) {
+				const g = new T.Group(),
+					b = pt(g, SG(.25), c, 0, 0, 0);
+				b.scale.z = 1.6;
+				pt(g, SG(.14), c, 0, .08, .4);
+				pt(g, new T.ConeGeometry(.05, .18, 6), 0xffa000, 0, .06, .58).rotation.x = Math.PI / 2;
+				pt(g, BG(.18, .03, tl), c2, 0, 0, -.4 - tl / 2);
+				const mk = x => {
+					const p = new T.Group();
+					p.position.set(x * .15, .05, 0);
+					pt(p, BG(.9, .04, .4), c2, x * .45, 0, 0);
+					g.add(p);
+					return p
+				};
+				g.scale.setScalar(s);
+				return {
+					g,
+					wl: mk(-1),
+					wr: mk(1)
+				}
+			}
+
+			function car(c, s = 1) {
+				const g = new T.Group(),
+					wh = [];
+				pt(g, BG(1.8, .6, 4), c, 0, .7, 0);
+				pt(g, BG(1.5, .5, 2), 0x9fd4ee, 0, 1.2, -.2);
+				[
+					[-1, 1.3],
+					[1, 1.3],
+					[-1, -1.3],
+					[1, -1.3]
+				].forEach(([x, z]) => {
+					const w = pt(g, new T.CylinderGeometry(.4, .4, .3, 10).rotateZ(Math.PI / 2), 0x151515, x * .95, .4, z);
+					wh.push(w)
+				});
+				g.scale.setScalar(s);
+				return {
+					g,
+					wh
+				}
+			}
+
+			function plane(s = 1) {
+				const g = new T.Group();
+				pt(g, new T.CylinderGeometry(1.2, 1.2, 14, 12).rotateX(Math.PI / 2), 0xf4f4f4, 0, 0, 0);
+				pt(g, new T.ConeGeometry(1.2, 3, 12).rotateX(Math.PI / 2), 0xdddddd, 0, 0, 8.5);
+				pt(g, BG(17, .25, 3), 0x3a5fa0, 0, -.3, .5);
+				pt(g, BG(6, .2, 1.6), 0x3a5fa0, 0, .2, -6.3);
+				pt(g, BG(.2, 2.6, 2), 0x3a5fa0, 0, 1.6, -6.3);
+				g.scale.setScalar(s);
+				return {
+					g
+				}
+			}
+
+			function ship(c, L) {
+				const g = new T.Group();
+				pt(g, BG(L * .22, 2.4, L), 0x303a48, 0, .4, 0);
+				pt(g, BG(L * .2, 4, L * .14), 0xf2f2f2, 0, 3.8, -L * .38);
+				for (let i = 0; i < 6; i++) pt(g, BG(L * .16, 2, L * .1), P(C), 0, 2.6, L * (.3 - i * .12));
+				return {
+					g
+				}
+			}
+
+			const put = (e, x, z, y = 0) => {
+					e.g.rotation.order = 'YXZ';
+					e.g.position.set(x, y, z);
+					W.add(e.g);
+					if (e.u) AN.push(e.u);
+					return e
+				},
+				spot = (ok, a = 9, b = 120, cx = 0, cz = 0) => {
+					for (let i = 0; i < 80; i++) {
+						const t = rnd() * 6.283,
+							r = R(a, b),
+							x = cx + Math.cos(t) * r,
+							z = cz + Math.sin(t) * r;
+						if (ok(x, z) && !hitB(x, z, 2) && Math.hypot(x, z) > 8) return [x, z]
+					}
+					return [R(15, 40), R(15, 40)]
+				};
+
+			function an(e, ph, a) {
+				const L = e.legs;
+				if (!L) return;
+				if (e.k === 'b') {
+					L[0].rotation.x = Math.sin(ph) * .7 * a;
+					L[1].rotation.x = -L[0].rotation.x;
+					e.arms[0].rotation.x = -L[0].rotation.x * .8;
+					e.arms[1].rotation.x = -L[1].rotation.x * .8
+				} else {
+					const q = Math.sin(ph) * .6 * a;
+					L[0].rotation.x = L[3].rotation.x = q;
+					L[1].rotation.x = L[2].rotation.x = -q
+				}
+			}
+
+			// 随机漫步；无人机靠近（低空）时会受惊奔逃
+			function walker(e, o = {}) {
+				const sp = o.v || 1.6,
+					ok = o.ok || okD,
+					y0 = o.y || 0;
+				let h = rnd() * 6.28,
+					tm = 0,
+					ph = rnd() * 6,
+					pz = 0;
+				const c = o.c || [0, 0],
+					[x, z] = spot(ok, o.a || 9, o.b || 120, c[0], c[1]);
+				e.u = (t, dt) => {
+					const p = e.g.position,
+						dx = p.x - S.pos.x,
+						dz = p.z - S.pos.z,
+						d = Math.hypot(dx, dz);
+					let v = sp,
+						run = 0;
+					if (o.flee !== false && S.mode !== 'landed' && d < 16 && S.pos.y < 22) {
+						h = angLerp(h, Math.atan2(dx, dz), dt * 6);
+						v = sp * 2.4;
+						run = 1;
+						pz = 0;
+						tm = 1
+					} else {
+						tm -= dt;
+						if (tm <= 0) {
+							tm = 2 + rnd() * 4;
+							h += (rnd() - .5) * 2.4;
+							pz = rnd() < .25 ? 1 + rnd() * 2 : 0
+						}
+					}
+					if (pz > 0) {
+						pz -= dt;
+						v = 0
+					}
+					const nx = p.x + Math.sin(h) * v * dt,
+						nz = p.z + Math.cos(h) * v * dt;
+					if (ok(nx, nz) && !hitB(nx, nz, 1.2)) {
+						p.x = nx;
+						p.z = nz
+					} else {
+						h += Math.PI * (.6 + rnd() * .8);
+						tm = 1.5
+					}
+					e.g.rotation.y = angLerp(e.g.rotation.y, h, Math.min(1, dt * 8));
+					ph += v * dt * (o.k || 4.5);
+					an(e, ph, v > .05 ? (run ? 1.4 : 1) : 0);
+					if (e.wh) e.wh.forEach(w => w.rotation.x += v * dt * 1.5);
+					p.y = y0 + (o.hop ? Math.abs(Math.sin(ph * .6)) * o.hop * (v > .05 ? 1 : 0) : 0) + (o.hov ? Math.sin(t * 2 + ph) * .15 : 0)
+				};
+				return put(e, x, z, y0)
+			}
+
+			function orbit(e, c, r, y, w, o = {}) {
+				let a = rnd() * 6.283;
+				e.u = (t, dt) => {
+					a += w * dt;
+					const sg = Math.sign(w);
+					e.g.position.set(c[0] + Math.cos(a) * r, y + Math.sin(t * 2 + a * 3) * (o.bz ?? 1), c[1] + Math.sin(a) * r);
+					e.g.rotation.y = Math.atan2(-Math.sin(a) * sg, Math.cos(a) * sg);
+					e.g.rotation.z = -(o.bank ?? .2) * sg;
+					if (e.wl) {
+						const q = Math.sin(t * (o.fl || 10) + a * 5) * .7;
+						e.wl.rotation.z = -q;
+						e.wr.rotation.z = q
+					}
+					if (e.legs) an(e, t * 12, 1)
+				};
+				return put(e, 0, 0, y)
+			}
+
+			function line(e, o) {
+				const dx = o.x1 - o.x0,
+					dz = o.z1 - o.z0,
+					L = Math.hypot(dx, dz),
+					hh = Math.atan2(dx, dz);
+				let u = rnd() * L,
+					d = 1,
+					hd = hh;
+				e.u = (t, dt) => {
+					u += d * o.v * dt;
+					if (u > L || u < 0) {
+						if (o.wrap) u = (u + L) % L;
+						else {
+							d = -d;
+							u = clamp(u, 0, L)
+						}
+					}
+					const f = u / L,
+						l = (o.off || 0) * d;
+					e.g.position.set(o.x0 + dx * f + dz / L * l, o.y || 0, o.z0 + dz * f - dx / L * l);
+					hd = angLerp(hd, d > 0 ? hh : hh + Math.PI, dt * 4);
+					e.g.rotation.y = hd;
+					if (e.wh) e.wh.forEach(w => w.rotation.x += o.v * dt * d * 1.4);
+					if (e.legs) an(e, t * 10, 1)
+				};
+				return put(e, o.x0, o.z0)
+			}
+
+			function jump(e, x, z, y0, face) {
+				let ph = rnd() * 6;
+				const sp = 6 + rnd() * 3;
+				e.u = (t, dt) => {
+					ph += dt * sp;
+					e.g.position.y = y0 + Math.abs(Math.sin(ph)) * .9;
+					e.arms.forEach(a => a.rotation.x = -2.7 + Math.sin(ph * 2) * .4);
+					e.g.rotation.y = face
+				};
+				return put(e, x, z, y0)
+			}
+
+			function floater(e, c, a) {
+				e.legs.forEach((l, i) => l.rotation.x = .3 * (i ? 1 : -1));
+				e.u = (t, dt) => {
+					e.g.position.set(c[0] + Math.sin(t * .3 + a) * 14, c[1] + Math.sin(t * .5 + a * 2) * 4, c[2] + Math.cos(t * .25 + a) * 10);
+					e.g.rotation.x += dt * .3;
+					e.g.rotation.y += dt * .2
+				};
+				return put(e, c[0], c[2], c[1])
+			}
+
+			function dolphin() {
+				const g = new T.Group(),
+					b = pt(g, SG(.5), 0x6a8aa8, 0, 0, 0);
+				b.scale.set(.8, .8, 2.6);
+				pt(g, BG(.9, .08, .4), 0x6a8aa8, 0, 0, -1.4);
+				pt(g, new T.ConeGeometry(.2, .5, 6), 0x5a7a98, 0, .45, -.1);
+				g.scale.setScalar(2);
+				let ph = rnd() * 6,
+					Pd = 6,
+					x = 0,
+					z = -150,
+					hd = 0;
+				const e = {
+					g
+				};
+				e.u = (t, dt) => {
+					ph += dt;
+					if (ph > Pd) {
+						ph = 0;
+						Pd = 5 + rnd() * 3;
+						x = R(-130, 130);
+						z = R(-300, -150);
+						hd = rnd() * 6.28
+					}
+					const v = ph / 2.2;
+					if (v < 1) {
+						g.position.set(x + Math.sin(hd) * v * 14, -1.5 + Math.sin(Math.PI * v) * 5, z + Math.cos(hd) * v * 14);
+						g.rotation.set(-Math.cos(Math.PI * v) * .9, hd, 0)
+					} else g.position.y = -4
+				};
+				return put(e, 0, -200, -4)
+			}
+
+			function takeoff() {
+				const e = plane(1);
+				let z = -290,
+					v = 0,
+					wait = 2;
+				e.u = (t, dt) => {
+					if (wait > 0) {
+						wait -= dt;
+						return
+					}
+					v = Math.min(62, v + 7 * dt);
+					z += v * dt;
+					const y = Math.max(0, (z - 60) * .4);
+					e.g.position.set(60, y + 1.5, z);
+					e.g.rotation.x = y > 0 ? -.25 : 0;
+					if (z > 380) {
+						z = -290;
+						v = 0;
+						wait = 6 + rnd() * 6
+					}
+				};
+				return put(e, 60, -290, 1.5)
+			}
+
+			function soccer() {
+				const ball = new T.Mesh(SG(.45), lm(0xffffff)),
+					bv = new T.Vector3(),
+					ps = [];
+				let kt = 0;
+				ball.position.y = .45;
+				W.add(ball);
+				for (let i = 0; i < 22; i++) {
+					const tm = i < 11,
+						e = biped({
+							shirt: tm ? 0xe53935 : 0x1e88e5,
+							pants: tm ? 0xffffff : 0x111111,
+							hair: 0x222222
+						}),
+						hx = (tm ? -1 : 1) * R(8, 45),
+						hz = R(-28, 28);
+					put(e, hx, hz);
+					ps.push({
+						e,
+						hx,
+						hz,
+						ph: rnd() * 6,
+						h: 0
+					})
+				}
+				AN.push((t, dt) => {
+					kt -= dt;
+					if (kt <= 0) {
+						kt = R(1, 2.2);
+						const a = rnd() * 6.283;
+						bv.set(Math.sin(a), 0, Math.cos(a)).multiplyScalar(R(8, 20))
+					}
+					const bp = ball.position;
+					bp.x += bv.x * dt;
+					bp.z += bv.z * dt;
+					bv.multiplyScalar(Math.exp(-dt * .8));
+					if (Math.abs(bp.x) > 50) {
+						bv.x *= -1;
+						bp.x = clamp(bp.x, -50, 50)
+					}
+					if (Math.abs(bp.z) > 31) {
+						bv.z *= -1;
+						bp.z = clamp(bp.z, -31, 31)
+					}
+					ps.forEach(p => {
+						const q = p.e.g.position,
+							dx = .55 * bp.x + .45 * p.hx - q.x,
+							dz = .55 * bp.z + .45 * p.hz - q.z,
+							d = Math.hypot(dx, dz),
+							v = Math.min(6.5, d * 1.2);
+						if (d > .3) {
+							q.x += dx / d * v * dt;
+							q.z += dz / d * v * dt;
+							p.h = angLerp(p.h, Math.atan2(dx, dz), dt * 8)
+						}
+						p.e.g.rotation.y = p.h;
+						p.ph += v * dt * 2.2;
+						an(p.e, p.ph, v > .3 ? 1.2 : 0)
+					})
+				})
+			}
+
+			const rep = (n, f) => {
+					for (let i = 0; i < n; i++) f(i)
+				},
+				ppl = (n, o = {}, b = {}) => rep(n, () => walker(biped(o), b)),
+				gulls = (n, y = 20) => rep(n, () => orbit(bird(0xffffff, 1.3, 0xcccccc), [R(-80, 80), R(-80, 80)], R(25, 70), R(y, y + 12), P([-1, 1]) * R(.2, .5))),
+				flies = n => rep(n, () => orbit(bird(P(C), .6, P(C), .1), [R(-60, 60), R(-60, 60)], R(4, 9), R(2, 5), P([-1, 1]) * R(.6, 1.2), {
+					fl: 22
+				})),
+				astros = (n, hop) => rep(n, () => walker(biped({
+					shirt: 0xf2f2f2,
+					pants: 0xf2f2f2,
+					skin: 0xf2f2f2,
+					astro: 1
+				}), {
+					v: 1.4,
+					hop
+				})),
+				rover = () => {
+					const e = car(0xdddddd, 1.2);
+					return walker(e, {
+						v: 2.2,
+						flee: false
+					})
+				},
+				dogs = (n, c = 0x8a5a2b) => rep(n, () => walker(quad({
+					c,
+					w: .3,
+					h: .3,
+					l: .7,
+					lh: .35,
+					s: 1.3
+				}), {
+					v: 2.2
+				})),
+				horse = c => quad({
+					c,
+					c2: 0x2a1a10,
+					w: .5,
+					h: .7,
+					l: 1.6,
+					lh: .9,
+					neck: .5,
+					s: 1.3
+				}),
+				robes = [0xe8dcc0, 0xc9a66b, 0xf5f0e0],
+				LIFE = [
+					() => {
+						ppl(10);
+						dogs(4);
+						gulls(6, 14);
+						flies(8)
+					},
+					() => {
+						const ok = (x, z) => z > -92 && Math.hypot(x, z) < 150;
+						ppl(12, {}, {
+							ok
+						});
+						rep(6, () => walker(quad({
+							c: 0xe53935,
+							w: .5,
+							h: .2,
+							l: .5,
+							lh: .15,
+							s: .8
+						}), {
+							v: .8,
+							ok
+						}));
+						rep(3, dolphin);
+						rep(3, i => line(ship(0, 14), {
+							x0: -380,
+							z0: -150 - i * 55,
+							x1: 380,
+							z1: -150 - i * 55,
+							v: 6 + i * 2,
+							wrap: 1
+						}));
+						gulls(8)
+					},
+					() => {
+						rep(14, i => {
+							const lane = 21 + 42 * ((i % 10) - 5),
+								x = i % 2;
+							line(car(P(C), 1.1), x ? {
+								x0: -250,
+								z0: lane,
+								x1: 250,
+								z1: lane,
+								v: R(9, 15),
+								off: 3
+							} : {
+								x0: lane,
+								z0: -250,
+								x1: lane,
+								z1: 250,
+								v: R(9, 15),
+								off: 3
+							})
+						});
+						ppl(8, {}, {
+							ok: (x, z) => Math.abs(x) < 28 && Math.abs(z) < 28,
+							b: 28,
+							a: 8
+						});
+						rep(2, () => orbit(plane(.5), [0, 0], R(120, 180), R(80, 110), .12, {
+							bz: 0
+						}))
+					},
+					() => {
+						ppl(6, {
+							ears: 0x222222,
+							s: 1.8
+						}, {
+							v: 1.4
+						});
+						ppl(14);
+						gulls(6, 10)
+					},
+					() => {
+						astros(5, 1.4);
+						rep(2, rover)
+					},
+					() => {
+						ppl(6);
+						dogs(3, 0xd8b060);
+						rep(3, i => line(car(P(C), 1.1), {
+							x0: 0,
+							z0: -60,
+							x1: 0,
+							z1: 30,
+							v: 5 + i,
+							off: 2
+						}));
+						gulls(4)
+					},
+					() => {
+						ppl(8, {}, {
+							v: 1.2
+						});
+						rep(3, () => walker(car(0xffffff, .6), {
+							v: 4,
+							flee: false
+						}));
+						gulls(4)
+					},
+					() => {
+						rep(8, () => walker(quad({
+							c: 0xf5f5f5,
+							c2: 0x222222,
+							w: .8,
+							h: .8,
+							l: 1.6,
+							spots: 4
+						}), {
+							v: 1
+						}));
+						rep(8, () => walker(quad({
+							c: 0xf0f0f0,
+							w: .5,
+							h: .5,
+							l: .9,
+							lh: .35,
+							s: 1.1
+						}), {
+							v: 1
+						}));
+						rep(4, () => walker(horse(0x7a4a2a), {
+							v: 1.6
+						}));
+						ppl(3, {
+							hat: 0x6b4a2b
+						});
+						rep(3, () => orbit(bird(0x4a3a2a, 3, 0x4a3a2a, .8), [R(-60, 60), R(-60, 60)], R(40, 80), R(40, 60), .25, {
+							fl: 6
+						}))
+					},
+					() => {
+						rep(6, i => {
+							const h = horse(P([0x7a4a2a, 0x222222, 0xb08a5a])),
+								rd = biped({
+									shirt: P(C),
+									s: .85
+								});
+							rd.g.position.set(0, h.top - .2, 0);
+							rd.legs.forEach(l => l.rotation.x = 1.1);
+							rd.arms.forEach(l => l.rotation.x = -.8);
+							h.g.add(rd.g);
+							orbit(h, [0, 0], 78 + (i % 3) * 8, 0, (.35 + rnd() * .1) * (i < 3 ? 1 : 1), {
+								bz: 0,
+								bank: 0
+							})
+						});
+						ppl(6)
+					},
+					() => {
+						rep(6, i => jump(biped({
+							shirt: P(C),
+							s: 1.7,
+							hair: 0x222222
+						}), -15 + i * 6, -76, 5, 0));
+						rep(30, () => jump(biped({}), R(-48, 48), R(-52, -14), 0, Math.PI))
+					},
+					() => soccer(),
+					() => {
+						rep(8, () => {
+							const e = biped({
+								s: 1.4
+							});
+							e.legs.forEach(l => l.rotation.x = .25);
+							pt(e.g, BG(.3, .03, 1.6), 0xd32f2f, 0, .03, .2);
+							const x0 = R(-100, 100);
+							line(e, {
+								x0,
+								z0: -150,
+								x1: x0 + 80,
+								z1: 100,
+								v: R(7, 11),
+								wrap: 1
+							})
+						});
+						rep(4, () => walker(quad({
+							c: 0xf5f5f5,
+							w: .3,
+							h: .3,
+							l: .8,
+							lh: .4,
+							s: 1.4
+						}), {
+							v: 2
+						}));
+						gulls(3, 25)
+					},
+					() => {
+						rep(6, () => walker(quad({
+							c: 0xb88a4a,
+							w: .6,
+							h: .8,
+							l: 1.6,
+							lh: .9,
+							neck: .7,
+							hump: 1,
+							s: 1.3
+						}), {
+							v: 1.2
+						}));
+						ppl(5, {
+							shirt: P(robes),
+							pants: P(robes),
+							hat: 0xe8dcc0
+						});
+						rep(4, () => orbit(bird(0x3a2a22, 2.5, 0x3a2a22, .6), [R(-80, 80), R(-80, 80)], R(30, 70), R(35, 55), .3, {
+							fl: 6
+						}))
+					},
+					() => {
+						const ok = (x, z) => Math.abs(x - 40) > 16 && Math.hypot(x, z) < 150;
+						rep(8, () => walker(quad({
+							c: 0x6b4a2b,
+							w: .3,
+							h: .35,
+							l: .6,
+							lh: .4,
+							s: 1.4
+						}), {
+							v: 1.5,
+							hop: 1,
+							ok
+						}));
+						rep(3, () => walker(quad({
+							c: 0xe0a020,
+							w: .5,
+							h: .5,
+							l: 1.3,
+							lh: .5,
+							spots: 6,
+							s: 1.4
+						}), {
+							v: 2,
+							ok
+						}));
+						rep(10, () => orbit(bird(P([0xe53935, 0x1e88e5, 0x43a047, 0xfdd835]), 1.2, P(C)), [R(-70, 70), R(-70, 70)], R(10, 40), R(10, 22), P([-1, 1]) * R(.3, .6), {
+							fl: 14
+						}));
+						flies(10)
+					},
+					() => {
+						ppl(8, {
+							hat: 0xffd23f,
+							shirt: 0xff8a00
+						}, {
+							ok: (x, z) => z > -92 && Math.hypot(x, z) < 150
+						});
+						rep(4, i => line(car(P([0x1e88e5, 0xffffff, 0xe53935]), 1.8), {
+							x0: -120,
+							z0: 8 - i * 12,
+							x1: 120,
+							z1: 8 - i * 12,
+							v: R(5, 9),
+							off: 2
+						}));
+						rep(2, i => line(ship(0, 50), {
+							x0: -380,
+							z0: -230 - i * 60,
+							x1: 380,
+							z1: -230 - i * 60,
+							v: 4 + i * 2,
+							wrap: 1
+						}));
+						gulls(6)
+					},
+					() => {
+						takeoff();
+						orbit(plane(.9), [0, 0], 190, 55, .1, {
+							bz: 0
+						});
+						rep(3, i => line(car(0xfdd835, .8), {
+							x0: 30,
+							z0: -200,
+							x1: 30,
+							z1: 200,
+							v: R(5, 8),
+							off: 2
+						}));
+						ppl(6, {}, {
+							ok: (x, z) => Math.hypot(x + 70, z + 45) < 30,
+							c: [-70, -45],
+							a: 5,
+							b: 25
+						})
+					},
+					() => {
+						const ok = (x, z) => Math.hypot(x, z + 80) > 62 && Math.hypot(x, z) < 150;
+						rep(4, i => {
+							const h = horse(0xdddddd),
+								rd = biped({
+									shirt: 0x9aa0a8,
+									hat: 0x9aa0a8,
+									s: .85
+								});
+							rd.g.position.set(0, h.top - .2, 0);
+							rd.legs.forEach(l => l.rotation.x = 1.1);
+							h.g.add(rd.g);
+							orbit(h, [0, -80], 68, 0, (i % 2 ? -1 : 1) * .12, {
+								bz: 0,
+								bank: 0
+							})
+						});
+						ppl(6, {
+							shirt: 0x8a6a40,
+							pants: 0x4a3a2a
+						}, {
+							ok
+						});
+						ppl(4, {
+							shirt: 0x9aa0a8,
+							pants: 0x777777,
+							hat: 0x9aa0a8
+						}, {
+							ok
+						});
+						rep(6, () => walker(quad({
+							c: 0xf0f0f0,
+							w: .5,
+							h: .5,
+							l: .9,
+							lh: .35,
+							s: 1.1
+						}), {
+							v: 1,
+							ok
+						}));
+						const d = bird(0x2a8a3a, 9, 0x7a2a8a, 1.6);
+						orbit(d, [0, -80], 70, 55, .15, {
+							fl: 5
+						});
+						gulls(4)
+					},
+					() => {
+						astros(4, 1.2);
+						rep(3, rover)
+					},
+					() => {
+						rep(8, () => {
+							const g = new T.Group();
+							pt(g, BG(.8, 1, .6), 0x2a2f4a, 0, .9, 0);
+							pt(g, BG(.55, .5, .5), 0x4a5070, 0, 1.7, 0);
+							pt(g, BG(.4, .1, .1), 0x39ff88, 0, 1.72, .3).material = BM(0x39ff88);
+							g.scale.setScalar(1.6);
+							walker({
+								g: (() => {
+									const w = new T.Group();
+									w.add(g);
+									return w
+								})()
+							}, {
+								v: 2.2,
+								hov: 1,
+								y: 1.2
+							})
+						});
+						rep(12, () => {
+							const lane = 23 + 46 * ((rnd() * 8 | 0) - 4),
+								e = car(0, 1.4);
+							e.g.traverse(o => {
+								if (o.material) o.material = BM(P([0xff2d95, 0x2dd4ff, 0x9d4dff, 0x39ff88]))
+							});
+							line(e, rnd() < .5 ? {
+								x0: -230,
+								z0: lane,
+								x1: 230,
+								z1: lane,
+								v: R(14, 26),
+								y: R(14, 70),
+								wrap: 1
+							} : {
+								x0: lane,
+								z0: -230,
+								x1: lane,
+								z1: 230,
+								v: R(14, 26),
+								y: R(14, 70),
+								wrap: 1
+							})
+						});
+						rep(2, () => {
+							const g = new T.Group(),
+								e = {
+									g
+								};
+							pt(g, new T.CylinderGeometry(4, 4, .8, 16), 0xaaaaaa, 0, 0, 0);
+							pt(g, new T.SphereGeometry(2, 12, 8, 0, 6.283, 0, 1.57), 0x66ffcc, 0, .4, 0);
+							pt(g, new T.TorusGeometry(4, .25, 6, 20).rotateX(Math.PI / 2), 0xff2d95, 0, 0, 0).material = BM(0xff2d95);
+							orbit(e, [0, 0], R(60, 130), R(90, 130), P([-1, 1]) * .25, {
+								bank: .1
+							})
+						})
+					},
+					() => {
+						ppl(10, {
+							shirt: P([0xf6a8c8, 0xe53935, 0x3a6fe0, 0xfdd835]),
+							s: 1.5
+						});
+						dogs(2, 0xd8b060);
+						rep(4, () => walker(quad({
+							c: 0x9a6a3a,
+							c2: 0xb08050,
+							w: .45,
+							h: .6,
+							l: 1.2,
+							lh: .8,
+							neck: .3,
+							s: 1.3
+						}), {
+							v: 1.3
+						}));
+						gulls(5, 14)
+					},
+					() => {
+						ppl(8, {
+							hat: 0xff8a00,
+							shirt: 0xff8a00
+						});
+						rep(4, () => walker(car(0xdddddd, 1.8), {
+							v: 5,
+							flee: false
+						}))
+					},
+					() => rep(6, i => floater(biped({
+						shirt: 0xf2f2f2,
+						pants: 0xf2f2f2,
+						skin: 0xf2f2f2,
+						astro: 1,
+						s: 1.8
+					}), [R(-30, 30), R(8, 22), -70 + R(-30, 30)], i * 1.3))
+				];
+
+			function spawnLife(i) {
+				sd = (i * 977 + 13) % 2147483646 + 1;
+				LIFE[i] && LIFE[i]()
+			}
+			const _load = load;
+			load = function(i) {
+				_load(i);
+				try {
+					spawnLife(i)
+				} catch (e) {
+					console.error(e)
+				}
+			};
+			sndLabels();
 			load(0);
 			hud();
 			toast('按 T 起飞');
