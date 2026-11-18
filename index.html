@@ -1934,6 +1934,19 @@
 				['pointerup', 'pointercancel', 'pointerleave'].forEach(v => b.addEventListener(v, () => keys.KeyF = false));
 				$('bar').appendChild(b)
 			}
+			[
+				['云台俯视 Z（按住）', 'KeyZ'],
+				['云台仰视 X（按住）', 'KeyX']
+			].forEach(([t, kc]) => {
+				const b = document.createElement('button');
+				b.textContent = t;
+				b.onpointerdown = e => {
+					e.preventDefault();
+					keys[kc] = true
+				};
+				['pointerup', 'pointercancel', 'pointerleave'].forEach(v => b.addEventListener(v, () => keys[kc] = false));
+				$('bar').appendChild(b)
+			});
 			/* ---- 每帧扩展 ---- */
 			const _upd = update,
 				_hud = hud;
@@ -2042,7 +2055,7 @@
 			/* ===== 无人机飞行音效（音量随速度增大，整体保持安静） ===== */
 			const SND = {
 					on: true,
-					vi: 0,
+					vi: 2,
 					ti: 0,
 					ok: false
 				},
@@ -2079,7 +2092,7 @@
 					if (AU) return;
 					const comp = AC.createDynamicsCompressor(),
 						master = AC.createGain();
-					master.gain.value = .6; // 总音量上限，避免过大
+					master.gain.value = 1; // 总音量上限，避免过大
 					comp.connect(master).connect(AC.destination);
 					const lp = AC.createBiquadFilter();
 					lp.type = 'lowpass';
@@ -2156,9 +2169,7 @@
 
 			function sndLabels() {
 				sb.on.textContent = SND.on ? '🔊 音效 M' : '🔇 音效 M';
-				sb.on.classList.toggle('off', !SND.on);
-				sb.vol.textContent = '音量：' + VOLS[SND.vi][0];
-				sb.tim.textContent = '音色：' + TIMS[SND.ti].n
+				sb.on.classList.toggle('off', !SND.on)
 			}
 			act.sound = () => {
 				aInit();
@@ -2167,24 +2178,9 @@
 				sndLabels();
 				toast(SND.on ? '音效开启' : '音效关闭')
 			};
-			act.vol = () => {
-				aInit();
-				SND.vi = (SND.vi + 1) % VOLS.length;
-				if (!SND.on) act.sound();
-				sndLabels();
-				toast('音量：' + VOLS[SND.vi][0])
-			};
-			act.tim = () => {
-				aInit();
-				SND.ti = (SND.ti + 1) % TIMS.length;
-				sndLabels();
-				toast('音色：' + TIMS[SND.ti].n)
-			};
 			ONCE.KeyM = 'sound';
 			[
-				['on', 'sound'],
-				['vol', 'vol'],
-				['tim', 'tim']
+				['on', 'sound']
 			].forEach(([k, a]) => {
 				const b = document.createElement('button');
 				b.onclick = () => act[a]();
